@@ -61,7 +61,7 @@ def test_hash_compare_ignores_hex_case():
 # ---- on the simulated ledger ----
 
 def test_sim_broker_view_returns_the_data_field(sc):
-    assert sc.b.broker_view(sc.broker_id).data == sc.rulebook_hash == C.rulebook_hash(sc.params.rulebook())
+    assert sc.b.broker_view(sc.broker_id).data == sc.rulebook_hash == C.rulebook_fingerprint(sc.params.rulebook())
 
 
 def test_sim_loanset_refused_when_the_referee_runs_different_rules(sc):

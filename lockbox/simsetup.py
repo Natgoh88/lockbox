@@ -9,7 +9,9 @@ from .sim import SimChain
 from .units import xrp_to_drops
 
 
-def build(interval: int = 120, seed_revenue: bool = True, closed_ended: bool = True, subscribe_s: int = 300, invest_s: int = 4500) -> Scenario:
+def build(interval: int = 120, seed_revenue: bool = True, closed_ended: bool = True, subscribe_s: int = 300, invest_s: int = 4500,
+          rulebook_path: str | None = None) -> Scenario:
+    """rulebook_path: where to publish the rulebook file. None by default, so sim runs never overwrite the real one."""
     chain = SimChain()
     names = ["lender", "borrower", "policy", "lockbox", "payout", "cust1", "cust2", "cust3"]
     addr = {n: Wallet.create().address for n in names}
@@ -18,7 +20,8 @@ def build(interval: int = 120, seed_revenue: bool = True, closed_ended: bool = T
     for n, xrp in {"lender": 500, "borrower": 5, "policy": 5, "lockbox": 10, "payout": 2, "cust1": 1000, "cust2": 1000, "cust3": 1000}.items():
         chain.fund(addr[n], xrp_to_drops(xrp))
     sc = Scenario(b=chain, lender=addr["lender"], borrower=borrower, policy_key=addr["policy"], lockbox_key=addr["lockbox"],
-                  payout=addr["payout"], customers=[addr["cust1"], addr["cust2"], addr["cust3"]], uw=demo_policy(interval))
+                  payout=addr["payout"], customers=[addr["cust1"], addr["cust2"], addr["cust3"]], uw=demo_policy(interval),
+                  rulebook_path=rulebook_path)
     sc.setup_lender(deposit_drops=xrp_to_drops(300), cover_drops=xrp_to_drops(40), closed_ended=closed_ended, subscribe_s=subscribe_s,
                     invest_s=invest_s)
     if seed_revenue:

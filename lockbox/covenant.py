@@ -56,6 +56,8 @@ FORBIDDEN_FIELDS = ("Paths", "SendMax", "DeliverMin", "DeliverMax", "Sponsor", "
 LOANSET_BANNED_FEES = ("LatePaymentFee", "ClosePaymentFee", "OverpaymentFee")
 APPROVAL_WINDOW = 10  # ledgers, roughly 40 seconds
 RULEBOOK_VERSION = "lockbox-rulebook-2"
+RULEBOOK_NAME = "lending-covenant"  # the rulebook's public identity: name, version number, fingerprint
+RULEBOOK_NUMBER = 1
 ALLOWED_TYPES = ("LoanSet", "LoanPay", "Payment", "SetRegularKey")
 
 
@@ -111,10 +113,53 @@ def rulebook_hash(config: dict) -> str:
     return _sha256_json({"version": RULEBOOK_VERSION, **config})
 
 
+def rulebook_fingerprint(config: dict) -> str:
+    """sha256 of the rulebook's name, version and settings. Goes in the LoanBroker Data field."""
+    return _sha256_json({"name": RULEBOOK_NAME, "version": RULEBOOK_NUMBER, "config": config})
+
+
+def rulebook_identity(config: dict) -> dict:
+    return {"name": RULEBOOK_NAME, "version": RULEBOOK_NUMBER, "fingerprint": rulebook_fingerprint(config)}
+
+
+def _payees_json(payees: dict[str, Payee]) -> dict:
+    return {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in payees.items()}
+
+
+def payees_from_json(d: dict) -> dict[str, Payee]:
+    return {a: Payee(cap_drops=int(p["cap_drops"]), invoice_ref=p["invoice_ref"]) for a, p in d.items()}
+
+
+def rulebook_document(config: dict, payees: dict[str, Payee], terms: AcceptedTerms | None = None) -> dict:
+    """What rulebooks/lending-covenant-v1.json holds. Its fingerprint must match the broker's Data field; with the
+    loan terms, its agreement hash must match the LoanSet's Data field."""
+    doc = {**rulebook_identity(config), "config": config, "approved_suppliers": _payees_json(payees)}
+    if terms is not None:
+        doc["terms"] = asdict(terms)
+        doc["agreement_hash"] = agreement_hash(terms, payees)
+    return doc
+
+
+def rulebook_document_problems(doc: dict) -> list[str]:
+    """Empty if the file is consistent with itself: the fingerprint and agreement hash recompute from its contents."""
+    out = []
+    if doc.get("name") != RULEBOOK_NAME or doc.get("version") != RULEBOOK_NUMBER:
+        out.append(f"rulebook is {doc.get('name')} v{doc.get('version')}, expected {RULEBOOK_NAME} v{RULEBOOK_NUMBER}")
+    if rulebook_fingerprint(doc.get("config", {})) != doc.get("fingerprint"):
+        out.append("fingerprint does not match the config in the file")
+    if "terms" in doc:
+        try:
+            h = agreement_hash(AcceptedTerms(**doc["terms"]), payees_from_json(doc.get("approved_suppliers", {})))
+        except (TypeError, KeyError, ValueError):
+            h = None
+        if h != doc.get("agreement_hash"):
+            out.append("agreement hash does not match the terms and suppliers in the file")
+    return out
+
+
 def agreement_hash(terms: AcceptedTerms, payees: dict[str, Payee]) -> str:
     """sha256 of the exact terms plus the approved payees. The borrower signs it; it goes in the LoanSet Data field."""
-    return _sha256_json({"terms": asdict(terms),
-                         "approved_payees": {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in payees.items()}})
+    return _sha256_json({"terms": asdict(terms), "approved_payees": _payees_json(payees)})
 
 
 def sign_acceptance(wallet, terms: AcceptedTerms, payees: dict[str, Payee]) -> Acceptance:

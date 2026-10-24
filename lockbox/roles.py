@@ -38,7 +38,7 @@ class Params:
     release_key: str = ""  # the borrower's registered key; the account goes back to it after full repayment
 
     def rulebook(self) -> dict:
-        """The numbers the referee enforces. Their hash goes in the LoanBroker Data field."""
+        """The numbers the referee enforces. The fingerprint of name, version and these goes in the LoanBroker Data field."""
         return {"max_fee_drops": self.max_fee_drops, "fee_buffer_drops": self.fee_buffer_drops, "pay_allowance_drops": self.pay_allowance_drops,
                 "reserve_installments": self.reserve_installments, "holdback_bps": self.holdback_bps,
                 "freeze_after_short_intervals": self.freeze_after_short_intervals, "approval_window": covenant.APPROVAL_WINDOW,
@@ -126,7 +126,7 @@ class PolicyService:
             freeze_after_short_intervals=p.freeze_after_short_intervals,
             approval=self.approval_state(tx.get("Account", self.lockbox)) if tx is not None else None,
             borrower=self.borrower, acceptance=self.acceptance, release_key=p.release_key,
-            rulebook_hash=covenant.rulebook_hash(p.rulebook()), broker_data=self._broker_data(tx),
+            rulebook_hash=covenant.rulebook_fingerprint(p.rulebook()), broker_data=self._broker_data(tx),
             **self._vault_redemption(tx),
         )
 
@@ -148,7 +148,9 @@ class PolicyService:
 
     def review(self, tx: dict) -> Verdict:
         v = covenant.evaluate(tx, self.context(tx))
+        rb = covenant.rulebook_identity(self.params.rulebook())
         events.emit("verdict", ts=self.b.now(), tx=tx.get("TransactionType"), allowed=v.allowed, reason=v.reason,
+                    rulebook=rb["name"], rulebook_version=rb["version"], rulebook_fingerprint=rb["fingerprint"],
                     amount=tx.get("Amount") or tx.get("PrincipalRequested"), free_cash=v.free_cash,
                     to=tx.get("Destination"), checks=[{"name": c.name, "ok": c.ok, "detail": c.detail} for c in v.checks])
         return v

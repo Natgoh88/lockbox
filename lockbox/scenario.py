@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import json
+import pathlib
 import time
 from dataclasses import dataclass, field
 
@@ -19,6 +21,8 @@ from .inflows import funded_by, parse_account_tx, repaid_loans
 from .roles import BorrowerAgent, Params, PolicyService, Servicer
 from .underwrite import Offer, Policy, underwrite
 from .units import RATE_UNITS
+
+RULEBOOK_FILE = pathlib.Path(__file__).resolve().parents[1] / "rulebooks" / "lending-covenant-v1.json"
 
 
 def demo_policy(interval: int = 120, service_fee_drops: int = 50_000) -> Policy:
@@ -42,6 +46,7 @@ class Scenario:
     broker_id: str = ""
     rulebook_hash: str = ""
     offer: Offer | None = None
+    rulebook_path: str | None = str(RULEBOOK_FILE)  # where the public rulebook file is written; None to skip (tests)
 
     def __post_init__(self):
         self.lockbox = addr_of(self.lockbox_key)
@@ -79,7 +84,8 @@ class Scenario:
             v = self._send(P.vault_create(la), self.lender, "VaultCreate")
         self.vault_id = self.policy.vault_id = v.created["Vault"]
         self._send(P.vault_deposit(la, self.vault_id, deposit_drops), self.lender, "VaultDeposit")
-        self.rulebook_hash = covenant.rulebook_hash(self.params.rulebook())
+        self.rulebook_hash = covenant.rulebook_fingerprint(self.params.rulebook())
+        self.write_rulebook()
         br = self._send(P.broker_set(la, self.vault_id, debt_max, int(cover_min_pct * RATE_UNITS / 100), RATE_UNITS, data=self.rulebook_hash),
                         self.lender, "LoanBrokerSet")
         self.broker_id = br.created["LoanBroker"]
@@ -141,8 +147,18 @@ class Scenario:
 
     def borrow(self) -> Result:
         assert self.offer is not None and self.servicer is not None
-        self.agent.accept_offer(self.offer, self.broker_id)
+        terms = self.agent.accept_offer(self.offer, self.broker_id)
+        self.write_rulebook(terms)  # the suppliers are frozen from here, so the file matches the LoanSet Data
         return self.servicer.originate(self.offer, self.agent)
+
+    def write_rulebook(self, terms=None) -> None:
+        """Publish the rules, the approved suppliers and (once accepted) the terms, so anyone can check the hashes."""
+        if not self.rulebook_path:
+            return
+        doc = covenant.rulebook_document(self.params.rulebook(), self.params.approved_payees, terms)
+        path = pathlib.Path(self.rulebook_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(doc, indent=2) + "\n")
 
     # ---- running ----
     def run(self, seconds: int, step: int = 30, revenue_per_step: int = 0) -> list[str]:
@@ -190,7 +206,8 @@ class Scenario:
             "frozen": covenant.frozen_reasons(ctx),
             "ledger_index": self.policy.ledger_clock(),
             "approval": self.policy.approval_state(self.lockbox).outstanding,
-            "rulebook_hash": self.rulebook_hash,
+            "rulebook_hash": self.rulebook_hash or covenant.rulebook_fingerprint(self.params.rulebook()),
+            "rulebook": {**covenant.rulebook_identity(self.params.rulebook()), "file": self.rulebook_path},
             "agreement_hash": self.policy.acceptance.agreement_hash if self.policy.acceptance else None,
             "approved_payees": {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in self.params.approved_payees.items()},
         }

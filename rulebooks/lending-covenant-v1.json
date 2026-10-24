@@ -1,0 +1,21 @@
+{
+  "name": "lending-covenant",
+  "version": 1,
+  "fingerprint": "4F1934812BE51C9281D1623C1C670F244277B5B96A71C99170F8B3E613737101",
+  "config": {
+    "max_fee_drops": 1000,
+    "fee_buffer_drops": 5000,
+    "pay_allowance_drops": 10000,
+    "reserve_installments": 1,
+    "holdback_bps": 0,
+    "freeze_after_short_intervals": 2,
+    "approval_window": 10,
+    "signer_weights": {
+      "referee": 2,
+      "borrower": 1,
+      "lender": 1
+    },
+    "quorum": 3
+  },
+  "approved_suppliers": {}
+}

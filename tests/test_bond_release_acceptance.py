@@ -190,7 +190,7 @@ def test_sim_rulebook_hash_in_broker_data_and_agreement_hash_in_loanset_data(loa
     hist = loaned.b.account_tx(loaned.lender)
     broker_tx = next(e["tx"] for e in hist if e["tx"]["TransactionType"] == "LoanBrokerSet")
     loan_tx = next(e["tx"] for e in hist if e["tx"]["TransactionType"] == "LoanSet")
-    assert broker_tx["Data"] == C.rulebook_hash(loaned.params.rulebook()) == loaned.state()["rulebook_hash"]
+    assert broker_tx["Data"] == C.rulebook_fingerprint(loaned.params.rulebook()) == loaned.state()["rulebook_hash"]
     assert loan_tx["Data"] == loaned.policy.acceptance.agreement_hash == loaned.state()["agreement_hash"]
     assert len(bytes.fromhex(loan_tx["Data"])) == 32  # well under the 256 byte Data limit; still check on Devnet
 
