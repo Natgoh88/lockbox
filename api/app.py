@@ -75,7 +75,10 @@ def autopilot():
             with LOCK:
                 s = sc()
                 if AUTO["revenue"] and s.servicer and s.servicer.loan_id:
-                    s.earn(xrp_to_drops(AUTO["revenue_xrp"] * random.uniform(0.8, 1.2)), random.randint(0, 1))
+                    try:
+                        s.earn(xrp_to_drops(AUTO["revenue_xrp"] * random.uniform(0.8, 1.2)), random.randint(0, 1))
+                    except RuntimeError as e:  # a buyer out of test XRP must never skip the servicer tick
+                        events.emit("error", msg=f"revenue skipped: {e}"[:200])
                 if s.servicer:
                     s.servicer.tick()
         except Exception as e:  # keep the loop alive, show the error on the dashboard

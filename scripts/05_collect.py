@@ -30,7 +30,10 @@ print("withdraw everything:", "ALLOWED (bug)" if v.allowed else "refused: " + v.
 last = None
 while True:
     if a.revenue:
-        sc.earn(xrp_to_drops(a.xrp * random.uniform(0.8, 1.2)), random.randint(0, 1))
+        try:
+            sc.earn(xrp_to_drops(a.xrp * random.uniform(0.8, 1.2)), random.randint(0, 1))
+        except RuntimeError as e:  # a customer out of test XRP must never stop the servicer
+            print(f"{time.strftime('%H:%M:%S')} revenue skipped: {e}")
     acts = sc.servicer.tick()
     s = sc.state()
     line = f"{time.strftime('%H:%M:%S')} {s['status']:<10} lockbox {fmt_xrp(s['lockbox']['balance'])}  remaining {s['loan']['remaining']}  {acts or ''}"

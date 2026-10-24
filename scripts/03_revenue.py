@@ -23,7 +23,11 @@ end = time.time() + a.minutes * 60
 n = 0
 while time.time() < end:
     amt = xrp_to_drops(a.xrp * random.uniform(0.8, 1.2))
-    r = sc.earn(amt, n)
+    try:
+        r = sc.earn(amt, n)
+        code = r.code
+    except RuntimeError as e:  # a customer out of test XRP: skip it, keep the others paying
+        code = f"skipped ({e}); top it up from the faucet"
     n += 1
-    print(f"{time.strftime('%H:%M:%S')} customer {n % 2 + 1} paid {fmt_xrp(amt)} XRP  {r.code}")
+    print(f"{time.strftime('%H:%M:%S')} customer {n % 2 + 1} paid {fmt_xrp(amt)} XRP  {code}")
     time.sleep(a.every)
