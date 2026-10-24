@@ -184,7 +184,9 @@ class XrplChain:
             parts = [sign_loan_set_by_counterparty(w, first, multisign=True).tx for w in (counterparty_signers or [])]
             final = combine_loanset_counterparty_signers(parts).tx
             return self._finish(final, tx)
-        if len(signers) == 1 and addr_of(signers[0]) == account:
+        if len(signers) == 1:
+            # the account's master key or its regular key (release step 2): a plain signature either way.
+            # One key can never meet the lockbox quorum of 3, so a lone signer is never meant as a multisig.
             return self._finish(sign(model, signers[0]), tx)
         signed = [sign(model, w, multisign=True) for w in signers]
         return self._finish(multisign(model, signed), tx)

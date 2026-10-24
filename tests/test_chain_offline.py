@@ -117,3 +117,19 @@ def test_broker_view_returns_the_data_field():
     assert c.broker_view("B").data == "66FC381D1B04C6813F437B392C708EFE8EFABA9EB33963958B0FC75E546055EB"
     c._entry = lambda index: {}
     assert c.broker_view("B").data == ""
+
+
+def test_regular_key_signs_alone_for_the_account():
+    # release step 2: the borrower's registered key, now the lockbox's regular key, removes the signer list
+    from xrpl.core.binarycodec import decode, encode_for_signing
+    from xrpl.core.keypairs import is_valid_message
+    lockbox, regular = Wallet.create(), Wallet.create()
+    c = Capture()
+    tx = base(P.as_dict(P.remove_signer_list(lockbox.address)))
+    assert c.submit(tx, [regular]).ok
+    signed = c.sent[0]
+    assert signed.account == lockbox.address
+    assert signed.signing_pub_key == regular.public_key and signed.txn_signature and not signed.signers
+    blob = signed.to_xrpl()
+    assert decode(encode(blob))["SigningPubKey"] == regular.public_key
+    assert is_valid_message(bytes.fromhex(encode_for_signing(blob)), bytes.fromhex(signed.txn_signature), regular.public_key)
