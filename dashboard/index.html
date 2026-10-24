@@ -21,7 +21,9 @@
   .tag { color:var(--mute); }
   .net { margin-left:auto; font:12px var(--mono); color:var(--mute); border:1px solid var(--line); padding:3px 9px; border-radius:99px; }
   main { display:grid; grid-template-columns:minmax(300px,1fr) minmax(340px,1.2fr); gap:16px; padding:12px 28px 28px; }
-  @media (max-width:880px){ main{grid-template-columns:1fr; padding:12px 16px 24px;} header{padding:16px 16px 4px;} }
+  @media (max-width:880px){ main{grid-template-columns:minmax(0,1fr); padding:12px 16px 24px;} header{padding:16px 16px 4px;} }
+  .card { min-width:0; overflow-wrap:anywhere; }
+  .kv { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
   .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
   .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--mute); margin:0 0 12px; font-weight:600; }
@@ -226,7 +228,7 @@ function render() {
     `<div style="grid-column:1/-1"><span class="small">Who loses first if a loan defaults</span><b style="font-size:14px">1. the borrower's bond, 2. the broker's first-loss cover, 3. depositors</b></div>`;
 
   $('b-lock').disabled = locked;
-  $('b-quote').disabled = !locked;
+  $('b-quote').disabled = !locked || S.has_loan;
   $('b-borrow').disabled = !S.has_offer || !(S.offer && S.offer.approved) || S.has_loan;
   $('b-all').disabled = !locked;
   $('b-free').disabled = !locked || !(bk.earned_free_cash > 0);
