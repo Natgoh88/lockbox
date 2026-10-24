@@ -231,9 +231,25 @@ def save_payees(d: dict) -> None:
 
 
 def apply_payees(sc) -> int:
-    for addr, p in load_payees().items():
-        sc.approve_payee(addr, cap_drops=int(p["cap_drops"]), invoice_ref=p["invoice_ref"])
-    return len(load_payees())
+    """Approve the saved suppliers. With a loan open the list is frozen (it is inside the agreement hash), so a
+    restarted script restores it instead, and only if it is exactly the list in the published rulebook file that
+    04_borrow wrote for this loan. Anything else is refused: a restart must never change what the borrower signed."""
+    saved = load_payees()
+    try:
+        for addr, p in saved.items():
+            sc.approve_payee(addr, cap_drops=int(p["cap_drops"]), invoice_ref=p["invoice_ref"])
+        return len(saved)
+    except RuntimeError:  # frozen while a loan is open
+        pass
+    from .buckets import Payee
+    path = Path(getattr(sc, "rulebook_path", "") or "")
+    published = json.loads(path.read_text()).get("approved_suppliers", {}) if path.is_file() else None
+    norm = {a: {"cap_drops": int(p["cap_drops"]), "invoice_ref": p["invoice_ref"]} for a, p in saved.items()}
+    if published is None or norm != {a: {"cap_drops": int(p["cap_drops"]), "invoice_ref": p["invoice_ref"]} for a, p in published.items()}:
+        raise RuntimeError("data/payees.json does not match the suppliers in the published rulebook for the open loan")
+    for addr, p in norm.items():
+        sc.params.approved_payees[addr] = Payee(cap_drops=p["cap_drops"], invoice_ref=p["invoice_ref"])
+    return len(norm)
 
 
 def fund(client: JsonRpcClient) -> Wallet:

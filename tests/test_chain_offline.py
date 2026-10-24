@@ -174,3 +174,26 @@ def test_lockbox_state_gives_the_regular_key_address_like_the_sim():
     assert st["regular_key"] == "rBorrowerKey" and st["master_disabled"] and st["signers"] == {}
     c.c = InfoClient({"Flags": 0})
     assert c.lockbox_state("rLockbox")["regular_key"] is None
+
+
+def test_payees_restore_after_restart_only_if_they_match_the_published_rulebook(tmp_path, monkeypatch):
+    import json
+    import pytest
+    import lockbox.chain as chain
+    from lockbox.simsetup import build
+    monkeypatch.setattr(chain, "PAYEES", tmp_path / "payees.json")
+    sup = Wallet.create().address
+    sc = build(rulebook_path=str(tmp_path / "rulebook.json"))
+    chain.save_payees({sup: {"cap_drops": 20_000_000, "invoice_ref": "PO-1001"}})
+    assert chain.apply_payees(sc) == 1  # before the loan: a normal approval, written into the rulebook at LoanSet
+    sc.lock(); sc.quote(); assert sc.borrow().ok
+    assert json.loads((tmp_path / "rulebook.json").read_text())["approved_suppliers"][sup]["invoice_ref"] == "PO-1001"
+    # a restarted script: same loan, empty Params. The frozen list is restored from the matching saved file
+    sc.params.approved_payees.clear()
+    assert chain.apply_payees(sc) == 1 and sc.params.approved_payees[sup].cap_drops == 20_000_000
+    # a saved list that differs from what the borrower signed is refused
+    sc.params.approved_payees.clear()
+    chain.save_payees({sup: {"cap_drops": 99_000_000, "invoice_ref": "PO-1001"}})
+    with pytest.raises(RuntimeError):
+        chain.apply_payees(sc)
+    assert not sc.params.approved_payees
