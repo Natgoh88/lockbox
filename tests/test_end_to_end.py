@@ -1,6 +1,5 @@
 """The whole story on the in-memory ledger."""
 import pytest
-from xrpl.wallet import Wallet
 
 from lockbox import protocol as P
 from lockbox.roles import Refused
@@ -113,17 +112,17 @@ def test_no_second_loan_while_one_is_active(loaned):
 
 
 def _spend_principal(loaned):
-    """M2: the borrower spends everything it may on an approved supplier (what the loan was for).
-    Before M2 the tests pulled this money to the borrower's own wallet as 'free cash', which the rulebook now refuses."""
-    sup = Wallet.create().address
-    loaned.approve_payee(sup, cap_drops=xrp_to_drops(1000), invoice_ref="PO-1")
+    """M2: the borrower spends everything it may on its approved supplier (what the loan was for).
+    Before M2 the tests pulled this money to the borrower's own wallet as 'free cash', which the rulebook now refuses.
+    Takes the `stocked` fixture: the supplier was approved before LoanSet."""
     bk = loaned.state()["buckets"]
-    v, r = loaned.agent.pay_payee(sup, bk["unspent_principal"] + bk["earned_free_cash"], "PO-1")
+    v, r = loaned.agent.pay_payee(loaned.supplier, bk["unspent_principal"] + bk["earned_free_cash"], "PO-1")
     assert v.allowed and r.ok, v.reason
     return r
 
 
-def test_revenue_stops_loan_goes_late_impaired_defaulted_cover_pays_and_recovery_runs(loaned):
+def test_revenue_stops_loan_goes_late_impaired_defaulted_cover_pays_and_recovery_runs(stocked):
+    loaned = stocked
     # the business spends the loan on stock and then its revenue dries up
     _spend_principal(loaned)
     vault_before = loaned.state()["vault"]["total"]
@@ -147,7 +146,8 @@ def _stress(loaned, top_up_xrp):
         loaned.earn(xrp_to_drops(top_up_xrp))
 
 
-def test_default_recovers_what_is_left_and_only_to_the_lender(loaned):
+def test_default_recovers_what_is_left_and_only_to_the_lender(stocked):
+    loaned = stocked
     _stress(loaned, top_up_xrp=8)  # balance is now above the reserve but below the next installment
     lender_before = loaned.b.balance(loaned.lender)
     cover_before = loaned.state()["broker"]["cover"]
@@ -165,7 +165,8 @@ def test_default_recovers_what_is_left_and_only_to_the_lender(loaned):
     assert not v.allowed
 
 
-def test_recovery_never_exceeds_what_was_owed(loaned):
+def test_recovery_never_exceeds_what_was_owed(stocked):
+    loaned = stocked
     _stress(loaned, top_up_xrp=8)
     loaned.run(500, step=30)
     loaned.earn(xrp_to_drops(500))  # a windfall after default
@@ -176,7 +177,8 @@ def test_recovery_never_exceeds_what_was_owed(loaned):
     assert loaned.policy.recovery_remaining == owed - loaned.policy.recovered
 
 
-def test_late_payment_during_grace_clears_the_impairment(loaned):
+def test_late_payment_during_grace_clears_the_impairment(stocked):
+    loaned = stocked
     _stress(loaned, top_up_xrp=0)
     acts = loaned.run(160, step=10)  # second installment is due and cannot be paid
     assert "impair" in acts and loaned.state()["loan"]["impaired"]
@@ -189,7 +191,8 @@ def test_late_payment_during_grace_clears_the_impairment(loaned):
     assert s["vault"]["loss_unrealized"] == 0
 
 
-def test_withdrawals_are_frozen_while_the_loan_is_late(loaned):
+def test_withdrawals_are_frozen_while_the_loan_is_late(stocked):
+    loaned = stocked
     _stress(loaned, top_up_xrp=0)
     loaned.run(160, step=10)
     loaned.earn(xrp_to_drops(30))

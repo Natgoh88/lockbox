@@ -16,10 +16,14 @@ INVOICE = "PO-1001"
 
 
 @pytest.fixture
-def funded(loaned):
-    """A live loan, with customer 3 approved as a supplier the principal may be spent with."""
-    loaned.approve_payee(loaned.customers[2], cap_drops=xrp_to_drops(40), invoice_ref=INVOICE)
-    return loaned
+def funded(sc):
+    """A live loan, with customer 3 approved as a supplier the principal may be spent with (approved before borrow:
+    the supplier list is frozen once the loan is open)."""
+    sc.lock()
+    sc.quote()
+    sc.approve_payee(sc.customers[2], cap_drops=xrp_to_drops(40), invoice_ref=INVOICE)
+    assert sc.borrow().ok
+    return sc
 
 
 def _withdraw_tx(sc, drops):

@@ -201,9 +201,13 @@ def test_unknown_destination_still_refused():
 # ---- end to end on the simulated ledger ----
 
 @pytest.fixture
-def funded(loaned):
-    loaned.approve_payee(loaned.customers[2], cap_drops=xrp_to_drops(40), invoice_ref="PO-1001")
-    return loaned
+def funded(sc):
+    # the supplier list is frozen at loan creation, so approve before borrow()
+    sc.lock()
+    sc.quote()
+    sc.approve_payee(sc.customers[2], cap_drops=xrp_to_drops(40), invoice_ref="PO-1001")
+    assert sc.borrow().ok
+    return sc
 
 
 def test_sim_principal_is_not_free_cash_after_funding(funded):

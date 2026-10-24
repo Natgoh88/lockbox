@@ -212,12 +212,12 @@ def test_sim_bond_is_swept_to_the_lender_first_on_default(sc):
     sc.lock()
     from lockbox.simsetup import build
     assert sc.quote().metrics.total_drops == build().quote().metrics.total_drops  # the bond is not counted as revenue
+    sup = Wallet.create().address  # the loan buys stock, then the buyers stop paying
+    sc.approve_payee(sup, cap_drops=xrp_to_drops(1000), invoice_ref="PO-9")  # before borrow: frozen once the loan is open
     assert sc.borrow().ok
     assert sc.state()["buckets"]["bond"] == xrp_to_drops(8)
     v, r = sc.agent.withdraw(xrp_to_drops(8))
     assert not v.allowed
-    sup = Wallet.create().address  # the loan buys stock, then the buyers stop paying
-    sc.approve_payee(sup, cap_drops=xrp_to_drops(1000), invoice_ref="PO-9")
     bk = sc.state()["buckets"]
     assert sc.agent.pay_payee(sup, bk["unspent_principal"] + bk["earned_free_cash"], "PO-9")[1].ok
     assert sc.state()["buckets"]["bond"] == xrp_to_drops(8)  # still untouched

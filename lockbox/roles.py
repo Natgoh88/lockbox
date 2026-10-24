@@ -253,7 +253,11 @@ class Servicer:
         return addr_of(self.key)
 
     def approve_payee(self, address: str, cap_drops: int, invoice_ref: str) -> None:
-        """The lender approves a supplier the loan principal may be spent with."""
+        """The lender approves a supplier the loan principal may be spent with. Only before LoanSet: the list is part of
+        the agreement hash the borrower signs, so it is frozen while a loan is open. (Mid-loan changes: roadmap.)"""
+        ln = self.b.loan_view(self.loan_id) if self.loan_id else None
+        if ln is not None and ln.active:
+            raise RuntimeError("the approved-supplier list is frozen while a loan is open")
         self.policy.params.approved_payees[address] = Payee(cap_drops=cap_drops, invoice_ref=invoice_ref)
         events.emit("approve_payee", ts=self.b.now(), to=address, cap=cap_drops, invoice=invoice_ref)
 
