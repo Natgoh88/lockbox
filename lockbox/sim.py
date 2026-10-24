@@ -22,6 +22,7 @@ LOAN_END_MARGIN = 60  # a loan on a closed-ended vault must end this many second
 LEDGER_SECONDS = 4  # a new ledger closes every few seconds on XRPL
 FIRST_LEDGER = 1_000
 SIM_LAST_LEDGER_OFFSET = 10  # prepare() fills LastLedgerSequence this far ahead, the referee's maximum
+SIM_FAUCET = "rSimFaucetXXXXXXXXXXXXXXXXXXXXXXXX"  # where fund() says new accounts came from (not a real address)
 
 
 @dataclass
@@ -82,7 +83,13 @@ class SimChain:
         return self.accounts.get(addr, Account()).sequence
 
     def fund(self, addr: str, drops: int) -> None:
+        """Faucet money. A new account gets a creating Payment in its history, as on a real ledger."""
+        new = addr not in self.accounts
         self.accounts.setdefault(addr, Account()).balance += drops
+        if new:
+            tx = {"TransactionType": "Payment", "Account": SIM_FAUCET, "Destination": addr, "Amount": str(drops), "Fee": "0"}
+            self._log(tx, "tesSUCCESS", {"delivered_amount": str(drops), "AffectedNodes": [
+                {"CreatedNode": {"LedgerEntryType": "AccountRoot", "NewFields": {"Account": addr, "Balance": str(drops)}}}]})
 
     def balance(self, addr: str) -> int:
         return self.accounts.get(addr, Account()).balance

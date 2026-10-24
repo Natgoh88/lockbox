@@ -233,10 +233,12 @@ def buckets_of(ctx: CovenantContext) -> Buckets:
 
 
 def free_cash(ctx: CovenantContext) -> int:
-    """What the borrower may send to its own wallet right now: earned free cash only, never principal."""
+    """What the borrower may send to its own wallet right now: earned free cash plus the owner's own opening
+    deposit (owner funds), never principal."""
     if in_default(ctx):
         return 0
-    return buckets_of(ctx).earned_free_cash
+    b = buckets_of(ctx)
+    return b.earned_free_cash + b.owner_funds
 
 
 def _is_drops(v) -> bool:

@@ -5,6 +5,7 @@ replay() walks the lockbox's account_tx history oldest first and tags money as i
   bond               the borrower's own XRP sent in with a "bond" memo, locked until the loan is settled
   unspent principal  loan principal not yet paid to an approved payee, plus anything an approved payee sends back
   holdback           a share of each revenue payment, kept for repayment while a loan is open
+  owner funds        the payment that created the account: the owner's own money, spendable by the owner
   earned             everything else: buyer payments and the business's own float
 
 Money going out comes off the pools in a fixed order. A LoanPay uses holdback, then earned money,
@@ -13,7 +14,7 @@ an approved payee uses principal first. A recovery payment to the lender takes t
 
 Then the rulebook's hold-backs are carved out of what is there: the account reserve and the fee
 buffer, then the next installment(s). What is left of earned money is the earned free cash, the only
-money the borrower may send to its own wallet.
+money the borrower may send to its own wallet, together with what is left of the owner funds.
 
 It also measures revenue (buyer payments, not principal, refunds or bond) in each whole payment
 interval since the loan started, so the rulebook can freeze withdrawals when revenue falls short.
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .inflows import created_account
 from .units import ripple_to_unix
 
 BOND_MEMO = "bond"
@@ -75,8 +77,7 @@ class Buckets:
     paid_to_payees: dict[str, int] = field(default_factory=dict)
     revenue_by_interval: tuple[int, ...] = ()  # revenue in each whole payment interval since the loan started
     short_streak: int = 0  # whole intervals in a row, ending with the latest, where revenue was below the installment
-    revenue_by_interval: tuple[int, ...] = ()  # revenue in each whole payment interval since the loan started
-    short_streak: int = 0  # whole intervals in a row, ending with the latest, where revenue was below the installment
+    owner_funds: int = 0  # left of the payment that created the account, the owner's own money (not earned)
 
     def to_dict(self) -> dict:
         return {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, tuple) else v) for k, v in self.__dict__.items()}
@@ -162,7 +163,7 @@ def _ordered(entries: list[dict]) -> list[dict]:
 
 class _Pools:
     def __init__(self, start: int):
-        self.p = {"earned": start, "holdback": 0, "principal": 0, "bond": 0}
+        self.p = {"earned": start, "owner": 0, "holdback": 0, "principal": 0, "bond": 0}
 
     def add(self, pool: str, drops: int) -> None:
         self.p[pool] += drops
@@ -175,10 +176,11 @@ class _Pools:
         self.p["earned"] -= drops  # more went out than was tagged: the history is incomplete, earned absorbs it
 
 
-ANY_ORDER = ("earned", "holdback", "principal", "bond")
-LOANPAY_ORDER = ("holdback", "earned", "principal", "bond")
-PAYEE_ORDER = ("principal", "earned", "holdback", "bond")
-RECOVERY_ORDER = ("bond", "holdback", "earned", "principal")
+# owner funds always sit right after earned money, so together they behave as the one pool they used to be
+ANY_ORDER = ("earned", "owner", "holdback", "principal", "bond")
+LOANPAY_ORDER = ("holdback", "earned", "owner", "principal", "bond")
+PAYEE_ORDER = ("principal", "earned", "owner", "holdback", "bond")
+RECOVERY_ORDER = ("bond", "holdback", "earned", "owner", "principal")
 
 
 def _ts(e: dict) -> int | None:
@@ -222,7 +224,8 @@ def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts, now:
                 pools.add("principal", d)
                 loan_seen = True
                 loan_start, interval, revenue = _ts(e), int(tx.get("PaymentInterval", 0) or 0), []
-                loan_start, interval, revenue = _ts(e), int(tx.get("PaymentInterval", 0) or 0), []
+            elif ok and created_account(_meta(e), lb):
+                pools.add("owner", d)
             elif ok and ttype == "Payment" and BOND_MEMO in memo_texts(tx):
                 pools.add("bond", d)
             elif ok and ttype == "Payment" and sender in cfg.approved_payees:
@@ -251,7 +254,11 @@ def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts, now:
 
     # true up to the real balance (rounding in a truncated history), then settle
     p = pools.p
-    p["earned"] = balance - p["holdback"] - p["principal"] - p["bond"]
+    p["earned"] = balance - p["owner"] - p["holdback"] - p["principal"] - p["bond"]
+    if p["earned"] < 0:
+        shift = min(max(0, p["owner"]), -p["earned"])
+        p["owner"] -= shift
+        p["earned"] += shift
     if loan.settled and not loan.active:
         p["earned"] += p["holdback"] + p["principal"]
         p["holdback"] = p["principal"] = 0
@@ -267,8 +274,8 @@ def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts, now:
         return need
 
     inst = loan.installment * min(cfg.reserve_installments, loan.payment_remaining) if loan.active else 0
-    short = carve(cfg.account_reserve + cfg.fee_buffer, ("earned", "holdback", "principal", "bond"))
-    short += carve(inst, ("holdback", "earned", "principal"))
+    short = carve(cfg.account_reserve + cfg.fee_buffer, ("owner", "earned", "holdback", "principal", "bond"))
+    short += carve(inst, ("holdback", "earned", "owner", "principal"))
     by_interval: tuple[int, ...] = ()
     if loan.active and loan_start is not None and interval > 0 and now is not None and now >= loan_start:
         sums = [0] * ((now - loan_start) // interval)  # whole intervals only
@@ -280,7 +287,7 @@ def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts, now:
     return Buckets(balance=balance, reserve=cfg.account_reserve, fee_buffer=cfg.fee_buffer, bond=max(0, p["bond"]),
                    installment_reserve=inst, holdback=max(0, p["holdback"]), unspent_principal=max(0, p["principal"]),
                    earned_free_cash=max(0, p["earned"]), shortfall=short, paid_to_payees=paid, revenue_by_interval=by_interval,
-                   short_streak=_streak(by_interval, loan.installment))
+                   short_streak=_streak(by_interval, loan.installment), owner_funds=max(0, p["owner"]))
 
 
 def from_balance(balance: int, cfg: Config, loan: LoanFacts) -> Buckets:
