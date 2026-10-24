@@ -4,6 +4,8 @@
 """
 import _boot  # noqa: F401
 
+from xrpl.wallet import Wallet
+
 from lockbox import events
 from lockbox.simsetup import build
 from lockbox.units import fmt_xrp as x, xrp_to_drops
@@ -44,13 +46,16 @@ st = sc.state()
 line(f"loan {st['status']}, all 6 installments collected without the borrower signing anything")
 line(f"lender earned {x(sc.b.balance(sc.lender) - lender0)} XRP in service fees (interest on a 12 minute loan is a few drops, so the demo income is the fee)")
 
-head("Bad path: same borrower profile, takes free cash, then revenue stops")
+head("Bad path: same borrower profile, spends the loan with its supplier, then revenue stops")
 events.reset()
 sc = build()
 sc.lock()
+supplier = Wallet.create().address
+sc.approve_payee(supplier, cap_drops=xrp_to_drops(100), invoice_ref="PO-1001")
 sc.quote()
 sc.borrow()
-sc.agent.withdraw(sc.state()["lockbox"]["free_cash"])
+bk = sc.state()["buckets"]
+sc.agent.pay_payee(supplier, bk["unspent_principal"] + bk["earned_free_cash"], "PO-1001")
 cover0 = sc.state()["broker"]["cover"]
 sc.run(6 * 120, step=30)
 st = sc.state()
