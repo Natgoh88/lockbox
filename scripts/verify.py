@@ -43,8 +43,7 @@ def sim_story(rulebook_path: str):
     sc.agent.withdraw(1_000)  # frozen while a payment is past due
     sc.run(400, step=30)  # still no sales: default, cover pays, recovery from the lockbox
     sc.agent.withdraw(1_000)
-    labels = {sc.payout: "owner wallet", supplier: "supplier", sc.lockbox: "lockbox", sc.servicer.address: "lender"}
-    return sc, labels
+    return sc
 
 
 def main() -> int:
@@ -59,14 +58,13 @@ def main() -> int:
     if a.devnet:
         from lockbox import devnet
         sc = devnet.build()
-        labels = {sc.payout: "owner wallet", sc.lockbox: "lockbox", sc.servicer.address if sc.servicer else "": "lender"}
         rulebook_path = a.rulebook
         decisions = [json.loads(line) for line in pathlib.Path(a.events).read_text().splitlines() if line.strip()]
         ledger = "Devnet"
     else:
         tmp = tempfile.mkdtemp(prefix="lockbox-verify-")
         rulebook_path = str(pathlib.Path(tmp) / "lending-covenant-v1.json")
-        sc, labels = sim_story(rulebook_path)
+        sc = sim_story(rulebook_path)
         decisions = events.recent(10_000)
         ledger = "the simulated ledger (not real money)"
     decisions = [e for e in decisions if e.get("kind") == "verdict" and "decision" in e]
@@ -96,10 +94,7 @@ def main() -> int:
     print()
 
     rows = verify.replay(decisions, history, sc.b.balance(sc.lockbox), sc.lockbox, doc, lambda b: sc.b.broker_view(b).data)
-    for r, ev in zip(rows, decisions):
-        dest = ev["decision"]["tx"].get("Destination")
-        if dest in labels:
-            r.tx = r.tx.split(" to ")[0] + f" to {labels[dest]}"
+    verify.label_rows(rows, decisions, verify.role_labels(sc, doc))  # same roles on the sim and on Devnet
     print(f"2. Replaying {len(rows)} referee decision(s) from the ledger history")
     print(verify.table(rows))
     bad = [r for r in rows if not r.matches]

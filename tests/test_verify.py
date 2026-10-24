@@ -107,3 +107,15 @@ def test_script_exit_codes(flag, code):
     r = subprocess.run(args, capture_output=True, text=True, timeout=120)
     assert r.returncode == code, r.stdout + r.stderr
     assert ("OK:" if code == 0 else "FAILED") in r.stdout
+
+
+def test_roles_come_from_the_published_file_even_after_a_restart(run):
+    sc, doc, decisions = run
+    sc.params.approved_payees.clear()  # a restarted Devnet process has no suppliers in memory
+    labels = verify.role_labels(sc, doc)
+    sup = next(iter(doc["approved_suppliers"]))
+    assert labels[sup] == "supplier" and labels[sc.payout] == "owner wallet" and labels[sc.servicer.address] == "lender"
+    rows = _replay(sc, doc, decisions)
+    verify.label_rows(rows, decisions, labels)
+    texts = " | ".join(r.tx for r in rows)
+    assert "to supplier" in texts and "to owner wallet" in texts

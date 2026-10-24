@@ -142,6 +142,25 @@ def replay(decisions: list[dict], history: list[dict], balance_now: int, lockbox
     return rows
 
 
+def role_labels(sc, doc: dict) -> dict[str, str]:
+    """Address -> role for the table: the owner's payout wallet, the lockbox, the lender, and every approved
+    supplier in the published rulebook file (so a restarted process with an empty list still labels them)."""
+    labels = {a: "supplier" for a in doc.get("approved_suppliers", {})}
+    labels.update({a: "supplier" for a in sc.params.approved_payees})
+    labels[sc.payout] = "owner wallet"
+    labels[sc.lockbox] = "lockbox"
+    if sc.servicer:
+        labels[sc.servicer.address] = "lender"
+    return labels
+
+
+def label_rows(rows: list[Row], decisions: list[dict], labels: dict[str, str]) -> None:
+    for r, ev in zip(rows, decisions):
+        dest = ev["decision"]["tx"].get("Destination")
+        if dest in labels:
+            r.tx = r.tx.split(" to ")[0] + f" to {labels[dest]}"
+
+
 def describe(tx: dict, lockbox: str) -> str:
     t = tx.get("TransactionType", "?")
     amt = tx.get("Amount") or tx.get("PrincipalRequested")
