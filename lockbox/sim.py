@@ -114,7 +114,7 @@ class SimChain:
     def broker_view(self, broker_id: str) -> BrokerView:
         b = self.brokers[broker_id]
         return BrokerView(cover_available=b["cover"], debt_total=b["debt_total"], cover_rate_minimum=b["cover_min"],
-                          cover_rate_liquidation=b["cover_liq"])
+                          cover_rate_liquidation=b["cover_liq"], data=b.get("data", ""))
 
     def vault_view(self, vault_id: str) -> VaultView:
         v = self.vaults[vault_id]
@@ -272,7 +272,8 @@ class SimChain:
         bid = self._id("broker")
         self.brokers[bid] = {"owner": tx["Account"], "vault": tx["VaultID"], "cover": 0, "debt_total": 0,
                              "debt_max": int(tx.get("DebtMaximum", 0)) or 10**18,
-                             "cover_min": int(tx.get("CoverRateMinimum", 0)), "cover_liq": int(tx.get("CoverRateLiquidation", RATE_UNITS))}
+                             "cover_min": int(tx.get("CoverRateMinimum", 0)), "cover_liq": int(tx.get("CoverRateLiquidation", RATE_UNITS)),
+                             "data": tx.get("Data", "")}
         return self._log(tx, "tesSUCCESS", {"AffectedNodes": [{"CreatedNode": {"LedgerEntryType": "LoanBroker", "LedgerIndex": bid}}]})
 
     def _do_LoanBrokerCoverDeposit(self, tx: dict) -> Result:

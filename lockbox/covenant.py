@@ -11,7 +11,8 @@ together cannot move money, and the referee alone can do nothing.
 The referee's rules are below. They are plain checks, no model, and they fail closed.
 
   LoanSet   (lockbox is the Counterparty) only if the borrower signed the hash of these exact terms
-            plus the approved payees, and that same hash is in the LoanSet Data field
+            plus the approved payees, that same hash is in the LoanSet Data field, and the loan
+            broker's Data field holds the hash of this rulebook
   LoanPay   the right loan, the right amount, no special flags. Lender + referee can autopay.
   Payment   to an approved payee (supplier): only with its invoice memo, within its cap, out of
             unspent principal (and earned free cash)
@@ -166,6 +167,8 @@ class CovenantContext:
     borrower: str = ""  # the borrower's signing address: acceptances must come from it
     acceptance: Acceptance | None = None
     release_key: str = ""  # the borrower's registered key the account is handed back to after repayment
+    rulebook_hash: str = ""  # the hash of the rules this referee enforces
+    broker_data: str | None = None  # the Data field of the LoanSet's broker, read from the ledger
 
 
 @dataclass
@@ -323,6 +326,8 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
             problem = acceptance_problem(ctx.acceptance, expected, ctx.borrower)
             add("borrower_signed_terms", problem is None, problem or "")
             add("agreement_hash_in_data", str(tx.get("Data", "")).upper() == expected, f"Data must be the agreement hash {expected}")
+        add("broker_rulebook_hash", bool(ctx.rulebook_hash) and str(ctx.broker_data or "").upper() == ctx.rulebook_hash.upper(),
+            f"the broker's Data is {ctx.broker_data or 'empty'}, this referee's rulebook hash is {ctx.rulebook_hash or 'unset'}")
 
     elif ttype == "SetRegularKey":
         add("release_to_registered_key", bool(ctx.release_key) and tx.get("RegularKey") == ctx.release_key,

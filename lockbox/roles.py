@@ -125,7 +125,16 @@ class PolicyService:
             freeze_after_short_intervals=p.freeze_after_short_intervals,
             approval=self.approval_state(tx.get("Account", self.lockbox)) if tx is not None else None,
             borrower=self.borrower, acceptance=self.acceptance, release_key=p.release_key,
+            rulebook_hash=covenant.rulebook_hash(p.rulebook()), broker_data=self._broker_data(tx),
         )
+
+    def _broker_data(self, tx: dict | None) -> str | None:
+        if not tx or tx.get("TransactionType") != "LoanSet":
+            return None
+        try:
+            return getattr(self.b.broker_view(tx.get("LoanBrokerID", "")), "data", None)
+        except Exception:  # unknown broker or unreadable entry: the check fails closed
+            return None
 
     def review(self, tx: dict) -> Verdict:
         v = covenant.evaluate(tx, self.context(tx))

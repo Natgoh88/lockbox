@@ -63,7 +63,8 @@ def test_rulebook_hash_changes_with_any_rule():
 
 def test_loanset_with_signed_acceptance_and_hash_in_data_allowed():
     acc = C.sign_acceptance(BORROWER, terms(), PAYEES)
-    v = evaluate(loanset(acc.agreement_hash), ctx(acceptance=acc))
+    rules = C.rulebook_hash({})
+    v = evaluate(loanset(acc.agreement_hash), ctx(acceptance=acc, rulebook_hash=rules, broker_data=rules))
     assert v.allowed, v.reason
 
 

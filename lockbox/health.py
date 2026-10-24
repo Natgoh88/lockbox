@@ -13,6 +13,7 @@ class BrokerView:
     debt_total: int
     cover_rate_minimum: int  # 1/10 bp
     cover_rate_liquidation: int = RATE_UNITS
+    data: str = ""  # the LoanBroker Data field (hex): Lockbox puts the rulebook hash here
 
 
 @dataclass

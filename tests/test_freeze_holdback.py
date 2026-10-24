@@ -167,6 +167,8 @@ def test_fee_buffer_is_never_free_cash():
 def test_sim_holdback_two_installments(sc):
     from lockbox import protocol as P  # noqa: F401
     sc.params.reserve_installments = 2
+    # the broker must publish the rulebook the referee enforces, so set up a fresh vault and broker under the new rules
+    sc.setup_lender(deposit_drops=xrp_to_drops(100), cover_drops=xrp_to_drops(30))
     sc.lock()
     sc.quote()
     assert sc.borrow().ok

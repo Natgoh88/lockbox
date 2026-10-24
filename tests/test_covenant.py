@@ -121,7 +121,8 @@ def loanset(**kw):
 def test_loanset_needs_accepted_matching_terms():
     # M2: the borrower signs the agreement hash and the LoanSet carries it in Data, otherwise the referee refuses
     acc = sign_acceptance(BORROWER, terms(), {})
-    c = ctx(loan=None, accepted=terms(), borrower=BORROWER.address, acceptance=acc)
+    rules = "AB" * 32  # the broker's Data must match the referee's rulebook hash
+    c = ctx(loan=None, accepted=terms(), borrower=BORROWER.address, acceptance=acc, rulebook_hash=rules, broker_data=rules)
     assert evaluate(loanset(Data=acc.agreement_hash), c).allowed
     assert "borrower_accepted_terms" in failed(evaluate(loanset(), ctx(loan=None)))
     assert "same_principal" in failed(evaluate(loanset(PrincipalRequested="20000000"), c))
