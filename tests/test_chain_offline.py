@@ -97,3 +97,13 @@ def test_prepare_keeps_last_ledger_inside_the_referee_window(monkeypatch):
     tx = {**P.as_dict(P.payment(w.address, dest.address, 1000)), "Fee": "12", "Sequence": 5}
     assert c.prepare(tx)["LastLedgerSequence"] == 6385720 + APPROVAL_WINDOW
     assert c.prepare({**tx, "LastLedgerSequence": 6385722})["LastLedgerSequence"] == 6385722  # a caller's choice is kept
+
+
+def test_periodic_payment_rounds_up_like_rippled():
+    # the first Devnet loan: truncating gave 2146360 and LoanPay failed with tecINSUFFICIENT_PAYMENT
+    from lockbox.chain import _num_up
+    assert _num_up("2096360.733564440452") == 2096361 and _num_up("2096360") == 2096360 and _num_up(None) == 0
+    c = XrplChain("http://127.0.0.1:1")
+    c._entry = lambda index: {"PeriodicPayment": "2096360.733564440452", "LoanServiceFee": "50000", "NextPaymentDueDate": 846184981,
+                              "PaymentRemaining": 6, "TotalValueOutstanding": "12578165"}
+    assert c.loan_view("L").installment == 2146361

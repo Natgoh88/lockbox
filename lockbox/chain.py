@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 
 from xrpl.clients import JsonRpcClient
@@ -46,6 +46,16 @@ def _num(v, default: int = 0) -> int:
         return default
     try:
         return int(Decimal(str(v)))
+    except Exception:
+        return default
+
+
+def _num_up(v, default: int = 0) -> int:
+    """Rounded up to whole drops. PeriodicPayment is fractional and rippled rounds it up (roundPeriodicPayment)."""
+    if v is None:
+        return default
+    try:
+        return int(Decimal(str(v)).to_integral_value(rounding=ROUND_CEILING))
     except Exception:
         return default
 
@@ -126,7 +136,7 @@ class XrplChain:
         if not n:
             return None
         flags = int(n.get("Flags", 0))
-        return LoanView(loan_id=loan_id, borrower=n.get("Borrower", ""), periodic_payment=_num(n.get("PeriodicPayment")),
+        return LoanView(loan_id=loan_id, borrower=n.get("Borrower", ""), periodic_payment=_num_up(n.get("PeriodicPayment")),
                         service_fee=_num(n.get("LoanServiceFee")), next_due=ripple_to_unix(int(n.get("NextPaymentDueDate", 0))),
                         payment_remaining=int(n.get("PaymentRemaining", 0)), grace_period=int(n.get("GracePeriod", 0)),
                         defaulted=bool(flags & LSF_LOAN_DEFAULT), impaired=bool(flags & LSF_LOAN_IMPAIRED),

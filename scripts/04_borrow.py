@@ -26,5 +26,7 @@ print("LoanSet:", r.code, explorer(r.hash) if r.hash else "")
 if r.ok:
     devnet.persist(sc)
     print("loan", sc.servicer.loan_id)
+    ln = sc.b.loan_view(sc.servicer.loan_id)
+    print(f"start python scripts/05_collect.py --revenue NOW: the first installment is due in {ln.next_due - sc.b.now()} s")
 else:
     print(r.meta)

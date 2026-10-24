@@ -41,7 +41,8 @@ Real Devnet (five terminals worth of steps, about 15 minutes of wall time becaus
 python scripts/01_setup_devnet.py   # checks amendments, funds 7 wallets from the faucet
 python scripts/02_lend_setup.py     # vault, loan broker, liquidity, first-loss cover
 python scripts/03_revenue.py --minutes 8     # customers pay the lockbox: the history the underwriter reads
-python scripts/04_borrow.py         # lock the account, underwrite, LoanSet
+python scripts/04_borrow.py         # lock the account, underwrite, LoanSet. Run it while 03 is still paying
+# start the servicer straight away: the first installment is due one interval (2 min) after LoanSet
 LOCKBOX_MODE=devnet uvicorn api.app:app --port 8403    # dashboard + autopilot servicer
 # or headless:
 python scripts/05_collect.py --revenue           # good borrower
@@ -101,6 +102,7 @@ Deterministic, no model. Revenue is bucketed by payment interval from `account_t
 5. `LoanPay` with `tfLoanLatePayment`: the amount must match the ledger's exact late amount. With no late fee or late interest set on the loan it should equal the installment.
 6. Number fields (`PeriodicPayment`, `TotalValueOutstanding`) are parsed by `chain._num`. Check them against a real ledger entry.
 7. Found on the first run: with `LendingProtocolV1_1` enabled, `LoanBrokerSet` returns `tecNO_PERMISSION` unless the vault is closed-ended. `02_lend_setup.py` now makes one: deposits until the subscription date (default 5 min), loans only after it, and every loan must end 60 s before the redemption date (default 75 min later). Run `04_borrow.py` after the subscription date.
+8. Also found on the first run: the account-creating faucet payment counted as revenue (now ignored); `XrplChain` had no ledger clock for the referee (added); `PeriodicPayment` is fractional and rippled rounds it up, so truncating it made `LoanPay` fail with `tecINSUFFICIENT_PAYMENT` (now rounded up). If the servicer is started past the grace period it defaults the loan on its first tick, so start it right after `04_borrow.py`.
 
 ## Layout
 
