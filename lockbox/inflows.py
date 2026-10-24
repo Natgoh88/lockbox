@@ -53,6 +53,27 @@ def funded_by(entries: list[dict], account: str, own: set[str]) -> bool:
     return False
 
 
+def repaid_loans(entries: list[dict], account: str, loan_view) -> int:
+    """How many loans this account borrowed (successful LoanSet with it as Counterparty) and fully repaid.
+    loan_view(loan_id) reads the Loan object: repaid means no payments remaining and not defaulted. A loan
+    that cannot be read is not counted (check on Devnet whether repaid loans stay readable)."""
+    n = 0
+    for e in entries:
+        tx = e.get("tx_json") or e.get("tx") or {}
+        meta = e.get("meta") or e.get("metaData") or {}
+        if not e.get("validated", True) or meta.get("TransactionResult") != "tesSUCCESS":
+            continue
+        if tx.get("TransactionType") != "LoanSet" or tx.get("Counterparty") != account:
+            continue
+        for node in meta.get("AffectedNodes", []):
+            c = node.get("CreatedNode", {})
+            if c.get("LedgerEntryType") == "Loan":
+                ln = loan_view(c.get("LedgerIndex"))
+                if ln is not None and ln.payment_remaining <= 0 and not ln.defaulted:
+                    n += 1
+    return n
+
+
 def parse_account_tx(entries: list[dict], account: str, ignore_senders: set[str] | None = None) -> list[Inflow]:
     """entries = result["transactions"] from an account_tx call (API v1 or v2 shape)."""
     ignore = ignore_senders or set()

@@ -14,6 +14,9 @@ Before measuring, senders are cleaned (clean_inflows):
   a sender the borrower's own wallets ever paid (own_funded, found by inflows.funded_by) is ignored
   no single sender counts for more than max_sender_share of the cleaned revenue
 
+Graduation: each loan this lockbox repaid on the ledger raises the limit by graduation_step (up to
+graduation_max), but the installment never goes above conservative inflow / graduation_min_coverage.
+
 Every offer also carries the same borrower priced WITHOUT the lockbox (Offer.unlocked). Those terms
 are our assumptions, not market data: rate plus unlocked_rate_add_pct points, limit times
 unlocked_limit_factor, because without the lockbox a lender cannot stop the cash leaving.
@@ -48,6 +51,9 @@ class Policy:
     unlocked_rate_add_pct: float = 6.0  # OUR ASSUMPTION: extra rate for the same borrower without a lockbox
     unlocked_limit_factor: float = 0.5  # OUR ASSUMPTION: share of the limit the same borrower gets without a lockbox
     stress_drop_pct: float = 30  # stress test: revenue falls by this much
+    graduation_step: float = 0.25  # limit multiplier added per loan repaid on the ledger
+    graduation_max: float = 2.0
+    graduation_min_coverage: float = 1.25  # even graduated, the installment stays at or below conservative inflow / this
 
 
 @dataclass
@@ -84,6 +90,7 @@ class Offer:
     rate_pct: float = 0.0
     unlocked: dict = field(default_factory=dict)  # the same borrower without the lockbox (our assumptions)
     stress: dict = field(default_factory=dict)  # coverage of the installment if revenue drops stress_drop_pct
+    graduation: dict = field(default_factory=dict)  # repaid loans and the limit multiplier they earned
 
 
 def annuity_payment(principal: float, r: float, n: int) -> float:
@@ -226,7 +233,7 @@ def stress_test(conservative: float, installment: int, p: Policy) -> dict:
 
 
 def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, requested_drops: int | None = None,
-               own_funded: frozenset | set = frozenset()) -> Offer:
+               own_funded: frozenset | set = frozenset(), repaid_loans: int = 0) -> Offer:
     p = p or Policy()
     counted, cleaning, uncapped = _clean(inflows, now, p, own_funded)
     m = measure(counted, now, p)
@@ -250,6 +257,10 @@ def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, request
     r = period_rate(units, p.payment_interval)
     inst_cap = m.conservative / p.coverage_target  # the whole installment, service fee included
     principal = annuity_principal(max(0.0, inst_cap - p.service_fee_drops), r, p.payment_total)
+    mult = min(p.graduation_max, 1 + p.graduation_step * max(0, repaid_loans))
+    if mult > 1:
+        floor_cap = annuity_principal(max(0.0, m.conservative / p.graduation_min_coverage - p.service_fee_drops), r, p.payment_total)
+        principal = min(principal * mult, floor_cap)
     principal = min(principal, p.max_principal_drops)
     if requested_drops is not None:
         principal = min(principal, requested_drops)
@@ -264,6 +275,9 @@ def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, request
         f"installment kept at or below conservative inflow / {p.coverage_target:g}",
         f"tier {tier}: rate {rate_pct:.1f}% a year",
     ]
+    if repaid_loans:
+        reasons.append(f"graduation: {repaid_loans} loan(s) repaid on the ledger, limit x{mult:g} "
+                       f"(installment still at most conservative inflow / {p.graduation_min_coverage:g})")
     if stress["stressed_coverage"] is not None:
         reasons.append(f"stress: if revenue drops {p.stress_drop_pct:g}%, conservative inflow covers the installment "
                        f"{stress['stressed_coverage']:.2f} times" + ("" if stress["still_covered"] else ", NOT enough"))
@@ -286,4 +300,6 @@ def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, request
         rate_pct=rate_pct,
         unlocked=unlocked_quote(approved, principal_i if approved else 0, rate_pct, p),
         stress=stress,
+        graduation={"repaid_loans": repaid_loans, "multiplier": mult, "max_multiplier": p.graduation_max,
+                    "min_coverage": p.graduation_min_coverage},
     )

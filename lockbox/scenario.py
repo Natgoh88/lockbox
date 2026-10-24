@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from . import covenant, events, health, protocol as P
 from .backend import Backend, Result, addr_of
 from .covenant import free_cash
-from .inflows import funded_by, parse_account_tx
+from .inflows import funded_by, parse_account_tx, repaid_loans
 from .roles import BorrowerAgent, Params, PolicyService, Servicer
 from .underwrite import Offer, Policy, underwrite
 from .units import RATE_UNITS
@@ -131,7 +131,8 @@ class Scenario:
         # a "customer" the borrower, lockbox or payout wallet ever paid is the borrower's own money coming back
         wallets = {addr_of(self.borrower), self.lockbox, self.payout}
         sock = {s for s in {f.sender for f in flows} if funded_by(self.b.account_tx(s), s, wallets)}
-        self.offer = underwrite(flows, self.b.now(), self.uw, requested, own_funded=sock)
+        repaid = repaid_loans(self.b.account_tx(self.lockbox), self.lockbox, self.b.loan_view)
+        self.offer = underwrite(flows, self.b.now(), self.uw, requested, own_funded=sock, repaid_loans=repaid)
         events.emit("quote", ts=self.b.now(), approved=self.offer.approved, tier=self.offer.tier, score=self.offer.score,
                     principal=self.offer.principal_drops, installment=self.offer.installment_drops, reasons=self.offer.reasons,
                     declines=self.offer.declines)
@@ -181,7 +182,8 @@ class Scenario:
             "offer": None if o is None else {"approved": o.approved, "tier": o.tier, "score": o.score, "principal": o.principal_drops,
                                               "installment": o.installment_drops, "rate_units": o.interest_rate_units, "payment_total": o.payment_total, "reasons": o.reasons,
                                               "declines": o.declines, "buckets": o.metrics.buckets,
-                                              "rate_pct": o.rate_pct, "unlocked": o.unlocked, "stress": o.stress},
+                                              "rate_pct": o.rate_pct, "unlocked": o.unlocked, "stress": o.stress,
+                                              "graduation": o.graduation},
             "recovery_remaining": self.policy.recovery_remaining,
             "buckets": ctx.buckets.to_dict() if ctx.buckets else None,
             "frozen": covenant.frozen_reasons(ctx),
