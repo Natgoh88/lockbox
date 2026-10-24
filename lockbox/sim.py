@@ -334,6 +334,8 @@ class SimChain:
         due = ln.periodic + ln.service_fee
         if amt < due:
             return self._log(tx, "tecINSUFFICIENT_PAYMENT")
+        if amt > due and amt == ln.total_owed + ln.service_fee:
+            return self._pay_off(tx, ln, amt)
         a = self.accounts[ln.borrower]
         if a.balance - due - int(tx.get("Fee", 10)) < self._reserve:
             self._charge_fee(tx)
@@ -359,6 +361,29 @@ class SimChain:
             ln.impaired = False
             v["loss_unrealized"] = 0
         return self._log(tx, "tesSUCCESS", {"delivered_amount": str(due)})
+
+    def _pay_off(self, tx: dict, ln: SimLoan, amt: int) -> Result:
+        """Whole loan in one LoanPay (TotalValueOutstanding + LoanServiceFee, no flags): the vault gets
+        TotalValueOutstanding, the broker owner the service fee, and the loan is closed."""
+        a = self.accounts[ln.borrower]
+        if a.balance - amt - int(tx.get("Fee", 10)) < self._reserve:
+            self._charge_fee(tx)
+            return self._log(tx, "tecUNFUNDED_PAYMENT")
+        self._charge_fee(tx)
+        b = self.brokers[ln.broker_id]
+        v = self.vaults[b["vault"]]
+        a.balance -= amt
+        v["available"] += ln.total_owed
+        v["total"] += ln.total_owed - ln.principal_out
+        self.accounts[b["owner"]].balance += ln.service_fee
+        b["debt_total"] -= ln.principal_out
+        ln.principal_out = 0
+        ln.remaining = 0
+        ln.total_owed = 0
+        if ln.impaired:
+            ln.impaired = False
+            v["loss_unrealized"] = 0
+        return self._log(tx, "tesSUCCESS", {"delivered_amount": str(amt)})
 
     def _do_LoanManage(self, tx: dict) -> Result:
         ln = self.loans.get(tx["LoanID"])

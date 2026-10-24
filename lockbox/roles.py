@@ -192,6 +192,14 @@ class BorrowerAgent:
         self.policy.accept(terms, acc)
         return terms
 
+    def pay_off(self) -> tuple[Verdict, Result | None]:
+        """Early full payoff: one LoanPay for TotalValueOutstanding plus LoanServiceFee, borrower + referee."""
+        ln = self.b.loan_view(self.policy.loan_id) if self.policy.loan_id else None
+        if ln is None:
+            raise RuntimeError("no loan to pay off")
+        amount = ln.total_owed + ln.service_fee
+        return self._send_with_referee(P.loan_pay(self.lockbox, ln.loan_id, amount), "pay_off", drops=amount)
+
     def post_bond(self, drops: int) -> Result:
         """Send the business's own XRP into the lockbox as a bond. Locked until the loan is settled, swept first on default."""
         tx = self.b.prepare(P.as_dict(P.payment(self.address, self.lockbox, drops, memos=[P.memo(buckets.BOND_MEMO)])))

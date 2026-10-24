@@ -14,6 +14,9 @@ The referee's rules are below. They are plain checks, no model, and they fail cl
             plus the approved payees, that same hash is in the LoanSet Data field, and the loan
             broker's Data field holds the hash of this rulebook
   LoanPay   the right loan, the right amount, no special flags. Lender + referee can autopay.
+            Early full payoff (XRPL "Pay off a loan" tutorial): exactly TotalValueOutstanding plus
+            LoanServiceFee, no flags, only while the loan is not past due, never out of the bond
+            or the XRP fee reserve.
   Payment   to an approved payee (supplier): only with its invoice memo, within its cap, out of
             unspent principal (and earned free cash)
             to the borrower's own wallet: only out of earned free cash
@@ -344,8 +347,16 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
             add("no_special_flags", flags == 0 or late, f"flags {flags} (only the late-payment flag is allowed, and only after the due date)")
             add("loan_open", loan.active, "loan is defaulted or fully paid")
             amt = tx.get("Amount")
-            ok = _is_drops(amt) and loan.installment <= int(amt) <= loan.installment + ctx.pay_allowance_drops
-            add("amount_matches_installment", ok, f"amount {amt}, installment {loan.installment} (+{ctx.pay_allowance_drops} allowed)")
+            payoff_amount = loan.total_owed + loan.service_fee
+            regular = _is_drops(amt) and loan.installment <= int(amt) <= loan.installment + ctx.pay_allowance_drops
+            payoff = not regular and _is_drops(amt) and loan.total_owed > 0 and int(amt) == payoff_amount
+            add("amount_matches_installment", regular or payoff,
+                f"amount {amt}, installment {loan.installment} (+{ctx.pay_allowance_drops} allowed) or full payoff {payoff_amount}")
+            if payoff:
+                # late fees would apply past the due date and we do not compute them
+                add("payoff_while_current", ctx.now <= loan.next_due and flags == 0, "full payoff only while the loan is not past due")
+                room = raw_spendable(ctx) - buckets_of(ctx).bond
+                add("payoff_within_funds", int(amt) <= room, f"amount {amt}, payable without the bond or fee reserve {room}")
             if _is_drops(amt):
                 floor = ctx.account_reserve_drops + ctx.max_fee_drops
                 left = ctx.balance_drops - int(amt) - (int(fee) if _is_drops(fee) else 0)

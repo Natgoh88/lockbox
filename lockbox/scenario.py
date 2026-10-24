@@ -112,6 +112,9 @@ class Scenario:
     def release(self):
         return self.agent.release()
 
+    def pay_off(self):
+        return self.agent.pay_off()
+
     # ---- underwriting ----
     def quote(self, requested: int | None = None) -> Offer:
         # the business's own wallets (bond, top-ups) are not revenue
