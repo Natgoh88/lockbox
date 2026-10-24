@@ -5,9 +5,16 @@ One person drives the dashboard, one person talks. Total: 180 seconds.
 ## Before you go on stage
 
 - Start the dashboard: `python scripts/offline_demo.py`, open http://localhost:8403, click **Reset**.
-- Check the header says **simulated ledger**. Revenue: on. Servicer: on.
+- Check the header says **simulated ledger**. (The Revenue and Servicer toggles only exist in Devnet mode, so there is nothing else to set.)
 - Open a terminal in the repo, ready to run `python scripts/verify.py`. Run it once beforehand so it is warm.
-- Open the Devnet explorer links from DEVNET.md in browser tabs, in the order below.
+- Open these Devnet tabs from DEVNET.md, in this order:
+  1. [LoanBrokerSet](https://devnet.xrpl.org/transactions/8BC076B34D27FDDBF303B5134C06542AE5D52E4BDEC60D16FE2D51672B8F1DC4): the broker's Data field holds the rulebook fingerprint
+  2. [LoanSet](https://devnet.xrpl.org/transactions/08C3E4572B95DBE4DDE1AE8AAEDE43A4E4A27C52CD85C346AED10E2D3E23CA5A): the agreement hash in Data, signed by borrower plus referee
+  3. [Supplier payment](https://devnet.xrpl.org/transactions/9BA6C4123389BC21DFDC2544E77CE9F716274FF7BDE0BE26E282B9EA5F222C36): 20 XRP with invoice PO-1001 in the memo
+  4. [Final repayment](https://devnet.xrpl.org/transactions/B80FD8747D54985C987B85269E6868C1AD67ABE297E0D09DE216D14F8E099CB1): LoanPay 6 of 6
+  5. [Release step 1](https://devnet.xrpl.org/transactions/150B823E889725379A0952086EF28281542721ECC97B3DA71324516F8E174AE6) and [step 2](https://devnet.xrpl.org/transactions/0817045C8C26D8B5EA1D629923BB94FE158758475009DF75E82E49EB3ADA23DE): the account goes back to the borrower
+  6. [Default](https://devnet.xrpl.org/transactions/1792A17BAD9881CEDB33C62DA2AB32C34B9DF74145F63C9604BA64527A871EB8): first-loss cover pays before depositors
+  7. The good-path verify table in DEVNET.md ("verify.py --devnet, good path"): 12 of 12 match
 - Have the backup video open in another tab, paused at the start.
 
 ## The script
@@ -22,7 +29,7 @@ One person drives the dashboard, one person talks. Total: 180 seconds.
 | 6 | 15 | **Pay approved supplier** | "Paying the supplier on the invoice is allowed, up to the approved amount, with the invoice number on the payment." |
 | 7 | 30 | **Advance 10 min, buyers stop paying**, then **Try to withdraw everything** | "Sales stop. Repayment comes first, so the account freezes on ledger facts: a payment is past due. If cash came back the servicer would take a late payment first. There is none, so the loan defaults. First-loss cover pays the depositors before they lose anything. And the owner still can't empty the account." |
 | 8 | 30 | Terminal: `python scripts/verify.py` | "Why trust the referee? Anyone can check it. This takes the published rulebook, checks its fingerprint against the one on the ledger, then replays every decision the referee made from the ledger history. Every row says matches: yes." |
-| 9 | 20 | Explorer tabs from DEVNET.md | "And this is not only a simulation. Here is the same flow on XRPL Devnet: the loan, six repayments, the account handed back after repayment, and the withdraw-everything refusal." |
+| 9 | 20 | The Devnet tabs, in order | "And this is not only a simulation. On XRPL Devnet: the rulebook fingerprint on the broker, the loan with the signed agreement hash, loan money paid to the supplier, the last repayment, the account handed back, a default where cover paid first, and verify matching all 12 referee decisions." |
 
 If there is time left over, run `python scripts/verify.py --tamper-verdict` and show the row that says NO.
 
@@ -40,6 +47,12 @@ The ledger's own check only looks at the last due date. Our referee also adds th
 
 **Does a late payment go straight to default?**
 No. Once a payment is past due, the servicer marks the loan impaired and keeps trying a late payment during the grace period. Even after grace, if the cash is there, it tries one more late payment first. It only defaults if that fails or the cash isn't there.
+
+**Why did the Devnet default only happen after the owner took money out?**
+On Devnet the default only happens after the owner withdraws their own money, because the lockbox keeps paying the lender while there is money in it. That's the rules working, not a bug.
+
+**Where are the refused payments on the ledger?**
+A refused payment never appears on the ledger, because the referee simply doesn't sign. Refusals show up in the referee's decision feed and the verify table.
 
 **Can the referee steal the money?**
 No. The referee has weight 2 and the quorum is 3, so it always needs the borrower or the lender as well. Borrower and lender together can't move money without the referee either.
