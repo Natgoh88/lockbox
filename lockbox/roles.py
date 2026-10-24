@@ -151,10 +151,18 @@ class PolicyService:
         except Exception:  # unreadable vault: the check fails closed
             return {"vault_readable": False}
 
-    def review(self, tx: dict) -> Verdict:
+    def review(self, tx: dict, dry_run: bool = False) -> Verdict:
+        """dry_run: only asks what the referee would say (a preview). Logged as a "dry_run" event without a decision
+        record, never as a "verdict", so verify never replays it as a decision. Nothing is signed either way."""
         ctx = self.context(tx)
         v = covenant.evaluate(tx, ctx)
         rb = covenant.rulebook_identity(self.params.rulebook())
+        if dry_run:
+            events.emit("dry_run", ts=self.b.now(), tx=tx.get("TransactionType"), allowed=v.allowed, reason=v.reason,
+                        rule=verify.deciding_rule(v), rulebook=rb["name"], rulebook_version=rb["version"],
+                        rulebook_fingerprint=rb["fingerprint"], amount=tx.get("Amount") or tx.get("PrincipalRequested"),
+                        to=tx.get("Destination"))
+            return v
         # the decision record lets anyone replay this verdict later (scripts/verify.py)
         decision = {"tx": dict(tx), "inputs": verify.record_inputs(ctx), "seen": self._seen, "balance": ctx.balance_drops}
         events.emit("verdict", ts=self.b.now(), tx=tx.get("TransactionType"), allowed=v.allowed, reason=v.reason,
