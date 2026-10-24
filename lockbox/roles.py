@@ -210,7 +210,7 @@ class BorrowerAgent:
     def release(self) -> tuple[Verdict, Result | None]:
         """After full repayment: referee + borrower set the borrower's registered key as the regular key, then the
         borrower removes the signer list with it. The order matters: XRPL will not remove the last way to sign.
-        NEEDS A DEVNET CHECK: chain.submit must single-sign with a regular key (signer address != account)."""
+        Checked on Devnet."""
         key = self.policy.params.release_key or self.address
         v, r = self._send_with_referee(P.set_regular_key(self.lockbox, key), "release_regular_key", key=key)
         if r is None or not r.ok:
