@@ -100,7 +100,7 @@ Never cut: referee required (M1), approved payees, automatic freeze, the withdra
 - Run `pytest` before every commit.
 
 ## Team split (respect file ownership)
-- Nathaniel: covenant.py, buckets.py, roles.py, sim.py, protocol.py and their tests. Milestones M1, M2.
+- Nathaniel: covenant.py, buckets.py, roles.py, sim.py, protocol.py, scenario.py and their tests. Milestones M1, M2.
 - Teammate: chain.py, scripts/, underwrite.py, inflows.py, api/, dashboard/, README.md, tests/test_attacks.py, and the only .wallets.json. Devnet (M5), M3, M4, red-team attack tests.
 - Never edit the other person's files without asking. Pull before starting, commit and push small changes often.
 - The dashboard depends on scenario.state(): add fields, never rename or remove existing ones.
