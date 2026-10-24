@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import buckets, covenant, events, health, protocol as P
+from . import buckets, covenant, events, health, protocol as P, verify
 from .backend import Backend, Result, addr_of
 from .buckets import Payee
 from .covenant import AcceptedTerms, Acceptance, ApprovalState, CovenantContext, LoanView, Verdict
@@ -63,6 +63,7 @@ class PolicyService:
         self.last_verdict: Verdict | None = None
         self.outstanding: dict | None = None  # the one approval the referee has handed out and not yet seen settle
         self.vault_id: str | None = None  # the lender's vault: a LoanSet must finish, grace included, before it redeems
+        self._seen: str | None = None  # hash of the newest lockbox history entry the last context was built from
 
     @property
     def address(self) -> str:
@@ -116,7 +117,10 @@ class PolicyService:
         balance, reserve = self.b.balance(self.lockbox), self.b.reserve(self.lockbox)
         cfg = buckets.Config(lockbox=self.lockbox, lender=self.lender, approved_payees=dict(p.approved_payees), account_reserve=reserve,
                              fee_buffer=p.fee_buffer_drops, reserve_installments=p.reserve_installments, holdback_bps=p.holdback_bps)
-        bk = buckets.replay(self.b.account_tx(self.lockbox), balance, cfg, covenant.loan_facts(loan, self.recovery_remaining), now=self.b.now())
+        history = self.b.account_tx(self.lockbox)
+        bk = buckets.replay(history, balance, cfg, covenant.loan_facts(loan, self.recovery_remaining), now=self.b.now())
+        seen = buckets._ordered([e for e in history if e.get("validated", True)])
+        self._seen = (seen[-1].get("hash") or buckets._tx(seen[-1]).get("hash")) if seen else None
         return CovenantContext(
             lockbox=self.lockbox, lender=self.lender, loan=loan, balance_drops=balance,
             account_reserve_drops=reserve, now=self.b.now(), allowlist=set(p.allowlist),
@@ -147,9 +151,13 @@ class PolicyService:
             return {"vault_readable": False}
 
     def review(self, tx: dict) -> Verdict:
-        v = covenant.evaluate(tx, self.context(tx))
+        ctx = self.context(tx)
+        v = covenant.evaluate(tx, ctx)
         rb = covenant.rulebook_identity(self.params.rulebook())
+        # the decision record lets anyone replay this verdict later (scripts/verify.py)
+        decision = {"tx": dict(tx), "inputs": verify.record_inputs(ctx), "seen": self._seen, "balance": ctx.balance_drops}
         events.emit("verdict", ts=self.b.now(), tx=tx.get("TransactionType"), allowed=v.allowed, reason=v.reason,
+                    rule=verify.deciding_rule(v), decision=decision,
                     rulebook=rb["name"], rulebook_version=rb["version"], rulebook_fingerprint=rb["fingerprint"],
                     amount=tx.get("Amount") or tx.get("PrincipalRequested"), free_cash=v.free_cash,
                     to=tx.get("Destination"), checks=[{"name": c.name, "ok": c.ok, "detail": c.detail} for c in v.checks])
