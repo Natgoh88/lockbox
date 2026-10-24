@@ -349,6 +349,11 @@ class Servicer:
             return acts
 
         if now > ln.next_due + ln.grace_period:
+            # past grace: one last late LoanPay if the cash is there, default only if that fails or the cash is not there
+            if self.late_attempts.get(("past_grace", ln.next_due)) is None:
+                self.late_attempts[("past_grace", ln.next_due)] = 1
+                if self._late_pay(ln, acts):
+                    return acts
             r = self.b.submit(self.b.prepare(P.as_dict(P.loan_manage(self.address, self.loan_id, "default"))), [self.key])
             events.emit("default", ts=now, ok=r.ok, code=r.code, covered=r.meta.get("default_covered"), loss=r.meta.get("default_loss"))
             acts.append("default")
@@ -360,14 +365,9 @@ class Servicer:
                 events.emit("impair", ts=now, ok=r.ok, code=r.code)
                 acts.append("impair")
             # if cash has come back during the grace period, collect with the late-payment flag
-            spendable = self.b.balance(self.lockbox) - self.b.reserve(self.lockbox)
-            if spendable >= ln.installment + 2 * self.policy.params.max_fee_drops and self.late_attempts.get(ln.next_due, 0) < 3:
+            if self.late_attempts.get(ln.next_due, 0) < 3 and self._can_cover(ln):
                 self.late_attempts[ln.next_due] = self.late_attempts.get(ln.next_due, 0) + 1
-                tx = self.b.prepare(P.as_dict(P.loan_pay(self.lockbox, self.loan_id, ln.installment, late=True)), signers_count=2)
-                r = self._submit_with_referee(tx)
-                if r is not None:
-                    events.emit("loan_pay", ts=now, ok=r.ok, code=r.code, drops=ln.installment, late=True)
-                    acts.append("late pay" if r.ok else f"late pay failed {r.code}")
+                self._late_pay(ln, acts)
             return acts
 
         lead = int(self.interval * self.policy.params.pay_lead_fraction)
@@ -384,6 +384,23 @@ class Servicer:
                 events.emit("loan_pay", ts=now, ok=r.ok, code=r.code, drops=ln.installment, remaining=ln.payment_remaining - (1 if r.ok else 0))
                 acts.append("pay" if r.ok else f"pay failed {r.code}")
         return acts
+
+    def _can_cover(self, ln: LoanView) -> bool:
+        spendable = self.b.balance(self.lockbox) - self.b.reserve(self.lockbox)
+        return spendable >= ln.installment + 2 * self.policy.params.max_fee_drops
+
+    def _late_pay(self, ln: LoanView, acts: list[str]) -> bool:
+        """One LoanPay with the late-payment flag, if the lockbox can cover it. True if the ledger took it."""
+        if not self._can_cover(ln):
+            return False
+        tx = self.b.prepare(P.as_dict(P.loan_pay(self.lockbox, self.loan_id, ln.installment, late=True)), signers_count=2)
+        r = self._submit_with_referee(tx)
+        if r is None:
+            acts.append("late pay refused")
+            return False
+        events.emit("loan_pay", ts=self.b.now(), ok=r.ok, code=r.code, drops=ln.installment, late=True)
+        acts.append("late pay" if r.ok else f"late pay failed {r.code}")
+        return r.ok
 
     def snapshot(self) -> dict:
         now = self.b.now()
