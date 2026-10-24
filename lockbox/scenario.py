@@ -2,7 +2,7 @@
 
   setup_lender   vault, broker, first-loss cover, deposit
   earn           customers pay the borrower's lockbox address (the revenue history)
-  lock           the borrower locks the account (2-of-3, master key off)
+  lock           the borrower locks the account (referee weight 2, borrower 1, lender 1, quorum 3, master key off)
   quote          cash-flow underwriting from the lockbox's own ledger history
   borrow         accept the terms, lender verifies the lock, LoanSet signed by the right people
   run            advance time, keep earning (or not), servicer collects / impairs / defaults / recovers
@@ -98,6 +98,10 @@ class Scenario:
         if not all(r.ok for r in results):
             raise RuntimeError("lockdown failed: " + ", ".join(r.code for r in results))
 
+    def approve_payee(self, address: str, cap_drops: int, invoice_ref: str) -> None:
+        assert self.servicer is not None
+        self.servicer.approve_payee(address, cap_drops, invoice_ref)
+
     # ---- underwriting ----
     def quote(self, requested: int | None = None) -> Offer:
         flows = parse_account_tx(self.b.account_tx(self.lockbox), self.lockbox, ignore_senders={addr_of(self.lender)})
@@ -151,4 +155,6 @@ class Scenario:
                                               "installment": o.installment_drops, "rate_units": o.interest_rate_units, "payment_total": o.payment_total, "reasons": o.reasons,
                                               "declines": o.declines, "buckets": o.metrics.buckets},
             "recovery_remaining": self.policy.recovery_remaining,
+            "buckets": ctx.buckets.to_dict() if ctx.buckets else None,
+            "approved_payees": {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in self.params.approved_payees.items()},
         }

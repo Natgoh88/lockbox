@@ -1,25 +1,31 @@
 """The covenant: the rulebook the policy service applies before it adds its signature.
 
-The lockbox account is a 2-of-3 multisig with the master key disabled:
+The lockbox account is a weighted multisig with the master key disabled:
 
-    borrower agent    the business that owns the revenue
-    lender servicer   the vault / broker owner that funded the loan
-    policy service    a neutral referee that only signs what this file allows
+    borrower agent    weight 1   the business that owns the revenue
+    lender servicer   weight 1   the vault / broker owner that funded the loan
+    policy service    weight 2   a neutral referee that only signs what this file allows
 
-Any two signatures move money. So the borrower alone cannot spend the lender's next payment,
-the lender alone cannot touch the borrower's cash, and the referee alone can do nothing.
+Quorum is 3, so every payment needs the referee plus one other. The borrower and the lender
+together cannot move money, and the referee alone can do nothing.
 The referee's rules are below. They are plain checks, no model, and they fail closed.
 
   LoanSet   (lockbox is the Counterparty) only if the borrower accepted these exact terms
   LoanPay   the right loan, the right amount, no special flags. Lender + referee can autopay.
-  Payment   to the borrower's allowlist: only while the loan is current, only up to free cash
+  Payment   to an approved payee (supplier): only with its invoice memo, within its cap, out of
+            unspent principal (and earned free cash)
+            to the borrower's own wallet: only out of earned free cash, only while the loan is current
             to the lender: only after default, only up to what was owed (recovery)
 
-Free cash = balance - account reserve - next installment(s) - fee buffer.
+Where the money belongs (reserve, installment reserve, unspent principal, earned free cash) is
+rebuilt from the ledger history by buckets.py.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from . import buckets as bk
+from .buckets import Buckets, Payee, memo_texts
 
 TF_LOAN_LATE_PAYMENT = 262144  # the only LoanPay flag the lockbox ever uses (overpayment 65536 and full payment 131072 are never allowed)
 TF_FULLY_CANONICAL = 0x80000000
@@ -78,6 +84,8 @@ class CovenantContext:
     fee_buffer_drops: int = 5_000
     pay_allowance_drops: int = 10_000  # LoanPay may exceed the installment by at most this much
     reserve_installments: int = 1
+    approved_payees: dict[str, Payee] = field(default_factory=dict)
+    buckets: Buckets | None = None  # rebuilt from history by the caller; without it every drop counts as earned
 
 
 @dataclass
@@ -122,11 +130,26 @@ def raw_spendable(ctx: CovenantContext) -> int:
     return max(0, ctx.balance_drops - ctx.account_reserve_drops - ctx.fee_buffer_drops)
 
 
+def loan_facts(loan: LoanView | None, recovery_remaining: int = 0) -> bk.LoanFacts:
+    if loan is None:
+        return bk.LoanFacts.none()
+    return bk.LoanFacts(installment=loan.installment, payment_remaining=loan.payment_remaining, active=loan.active,
+                        settled=not loan.active and recovery_remaining <= 0)
+
+
+def buckets_of(ctx: CovenantContext) -> Buckets:
+    if ctx.buckets is not None:
+        return ctx.buckets
+    cfg = bk.Config(lockbox=ctx.lockbox, lender=ctx.lender, approved_payees=dict(ctx.approved_payees),
+                    account_reserve=ctx.account_reserve_drops, fee_buffer=ctx.fee_buffer_drops, reserve_installments=ctx.reserve_installments)
+    return bk.from_balance(ctx.balance_drops, cfg, loan_facts(ctx.loan, ctx.recovery_remaining))
+
+
 def free_cash(ctx: CovenantContext) -> int:
-    """What the borrower may withdraw right now."""
+    """What the borrower may send to its own wallet right now: earned free cash only, never principal."""
     if in_default(ctx):
         return 0
-    return max(0, raw_spendable(ctx) - installment_reserve(ctx))
+    return buckets_of(ctx).earned_free_cash
 
 
 def _is_drops(v) -> bool:
@@ -136,6 +159,14 @@ def _is_drops(v) -> bool:
 def _int(tx: dict, key: str) -> int:
     v = tx.get(key, 0)
     return int(v) if (isinstance(v, int) or _is_drops(v)) else -1
+
+
+def _not_frozen(add, ctx: CovenantContext) -> None:
+    loan = ctx.loan
+    if loan is not None and loan.active:
+        add("loan_current", not loan.impaired and ctx.now <= loan.next_due, "loan is impaired or past due, withdrawals are frozen")
+    if in_default(ctx):
+        add("not_in_default", False, "the loan defaulted and recovery is still pending")
 
 
 def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
@@ -198,12 +229,19 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
             if _is_drops(amt):
                 cap = min(ctx.recovery_remaining, raw_spendable(ctx))
                 add("within_recovery_cap", int(amt) <= cap, f"amount {amt}, recoverable {cap}")
+        elif dest in ctx.approved_payees:
+            payee = ctx.approved_payees[dest]
+            add("invoice_memo", payee.invoice_ref in memo_texts(tx), f"a payment to {dest} must carry invoice {payee.invoice_ref} in a memo")
+            _not_frozen(add, ctx)
+            if _is_drops(amt):
+                b = buckets_of(ctx)
+                left = payee.cap_drops - b.paid_to_payees.get(dest, 0)
+                add("within_payee_cap", int(amt) <= left, f"amount {amt}, left under the cap {left}")
+                spendable = b.unspent_principal + fc
+                add("within_principal", int(amt) <= spendable, f"amount {amt}, unspent principal plus free cash {spendable}")
         else:
             add("destination_allowlisted", dest in ctx.allowlist, f"{dest} is not on the allowlist")
-            if loan is not None and loan.active:
-                add("loan_current", not loan.impaired and ctx.now <= loan.next_due, "loan is impaired or past due, withdrawals are frozen")
-            if in_default(ctx):
-                add("not_in_default", False, "the loan defaulted and recovery is still pending")
+            _not_frozen(add, ctx)
             if _is_drops(amt):
                 add("within_free_cash", int(amt) <= fc, f"amount {amt}, free cash {fc}")
 

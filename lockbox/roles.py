@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import covenant, events, health, protocol as P
+from . import buckets, covenant, events, health, protocol as P
 from .backend import Backend, Result, addr_of
+from .buckets import Payee
 from .covenant import AcceptedTerms, CovenantContext, LoanView, Verdict
 from .underwrite import Offer
 
@@ -25,7 +26,8 @@ class Refused(Exception):
 
 @dataclass
 class Params:
-    allowlist: set[str] = field(default_factory=set)
+    allowlist: set[str] = field(default_factory=set)  # the borrower's own wallets: earned free cash only
+    approved_payees: dict[str, Payee] = field(default_factory=dict)  # lender-approved suppliers: principal, capped, invoice memo
     max_fee_drops: int = 1_000
     fee_buffer_drops: int = 5_000
     pay_allowance_drops: int = 10_000
@@ -45,6 +47,7 @@ class PolicyService:
         self._last_owed = 0
         self.owed_at_default: int | None = None
         self.recovered = 0
+        self.last_verdict: Verdict | None = None
 
     @property
     def address(self) -> str:
@@ -70,11 +73,16 @@ class PolicyService:
             elif loan.defaulted and self.owed_at_default is None:
                 self.owed_at_default = self._last_owed or loan.total_owed
         p = self.params
+        balance, reserve = self.b.balance(self.lockbox), self.b.reserve(self.lockbox)
+        cfg = buckets.Config(lockbox=self.lockbox, lender=self.lender, approved_payees=dict(p.approved_payees), account_reserve=reserve,
+                             fee_buffer=p.fee_buffer_drops, reserve_installments=p.reserve_installments)
+        bk = buckets.replay(self.b.account_tx(self.lockbox), balance, cfg, covenant.loan_facts(loan, self.recovery_remaining))
         return CovenantContext(
-            lockbox=self.lockbox, lender=self.lender, loan=loan, balance_drops=self.b.balance(self.lockbox),
-            account_reserve_drops=self.b.reserve(self.lockbox), now=self.b.now(), allowlist=set(p.allowlist),
+            lockbox=self.lockbox, lender=self.lender, loan=loan, balance_drops=balance,
+            account_reserve_drops=reserve, now=self.b.now(), allowlist=set(p.allowlist),
             accepted=self.accepted, recovery_remaining=self.recovery_remaining, max_fee_drops=p.max_fee_drops,
             fee_buffer_drops=p.fee_buffer_drops, pay_allowance_drops=p.pay_allowance_drops, reserve_installments=p.reserve_installments,
+            approved_payees=dict(p.approved_payees), buckets=bk,
         )
 
     def review(self, tx: dict) -> Verdict:
@@ -86,7 +94,7 @@ class PolicyService:
 
     def cosign(self, tx: dict):
         """Returns this service's key if the covenant allows the transaction, otherwise raises Refused."""
-        v = self.review(tx)
+        v = self.last_verdict = self.review(tx)
         if not v.allowed:
             raise Refused(v)
         return self.key
@@ -138,14 +146,25 @@ class BorrowerAgent:
             raise ValueError("LoanSet does not match the accepted offer")
         return self.key
 
+    def _send_with_referee(self, tx_model, kind: str, **extra) -> tuple[Verdict, Result | None]:
+        tx = self.b.prepare(P.as_dict(tx_model), signers_count=2)
+        try:
+            pkey = self.policy.cosign(tx)
+        except Refused as e:
+            return e.verdict, None
+        r = self.b.submit(tx, [self.key, pkey])
+        self.policy.observe(tx, r)
+        events.emit(kind, ts=self.b.now(), ok=r.ok, code=r.code, **extra)
+        return self.policy.last_verdict, r
+
     def withdraw(self, drops: int) -> tuple[Verdict, Result | None]:
-        tx = self.b.prepare(P.as_dict(P.payment(self.lockbox, self.payout, drops)), signers_count=2)
-        v = self.policy.review(tx)
-        if not v.allowed:
-            return v, None
-        r = self.b.submit(tx, [self.key, self.policy.key])
-        events.emit("withdraw", ts=self.b.now(), ok=r.ok, code=r.code, drops=drops)
-        return v, r
+        """Send earned free cash to the business's own payout wallet."""
+        return self._send_with_referee(P.payment(self.lockbox, self.payout, drops), "withdraw", drops=drops)
+
+    def pay_payee(self, dest: str, drops: int, invoice_ref: str) -> tuple[Verdict, Result | None]:
+        """Pay an approved supplier out of the loan principal. The invoice reference rides in a memo."""
+        tx = P.payment(self.lockbox, dest, drops, memos=[P.memo(invoice_ref, "invoice")])
+        return self._send_with_referee(tx, "pay_payee", drops=drops, to=dest, invoice=invoice_ref)
 
 
 class Servicer:
@@ -167,6 +186,11 @@ class Servicer:
     @property
     def address(self) -> str:
         return addr_of(self.key)
+
+    def approve_payee(self, address: str, cap_drops: int, invoice_ref: str) -> None:
+        """The lender approves a supplier the loan principal may be spent with."""
+        self.policy.params.approved_payees[address] = Payee(cap_drops=cap_drops, invoice_ref=invoice_ref)
+        events.emit("approve_payee", ts=self.b.now(), to=address, cap=cap_drops, invoice=invoice_ref)
 
     def verify_lockbox(self) -> list[tuple[str, bool]]:
         """Read the lockbox's on-ledger state. The lender does not trust the borrower's word, only the ledger."""

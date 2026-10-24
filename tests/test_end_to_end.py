@@ -1,5 +1,6 @@
 """The whole story on the in-memory ledger."""
 import pytest
+from xrpl.wallet import Wallet
 
 from lockbox import protocol as P
 from lockbox.roles import Refused
@@ -62,6 +63,11 @@ def test_withdraw_everything_refused_withdraw_free_cash_allowed(loaned):
     s = loaned.state()["lockbox"]
     v, r = loaned.agent.withdraw(s["balance"] - 2_000_000)
     assert not v.allowed and r is None and "within_free_cash" in v.reason
+    # M2: right after funding the money is loan principal, not earned cash, so nothing is free yet
+    assert s["free_cash"] == 0
+    loaned.earn(xrp_to_drops(5))  # a buyer pays an invoice
+    s = loaned.state()["lockbox"]
+    assert s["free_cash"] > 0
     before = loaned.b.balance(loaned.payout)
     v, r = loaned.agent.withdraw(s["free_cash"])
     assert v.allowed and r.ok
@@ -106,11 +112,20 @@ def test_no_second_loan_while_one_is_active(loaned):
         loaned.policy.cosign(tx)
 
 
+def _spend_principal(loaned):
+    """M2: the borrower spends everything it may on an approved supplier (what the loan was for).
+    Before M2 the tests pulled this money to the borrower's own wallet as 'free cash', which the rulebook now refuses."""
+    sup = Wallet.create().address
+    loaned.approve_payee(sup, cap_drops=xrp_to_drops(1000), invoice_ref="PO-1")
+    bk = loaned.state()["buckets"]
+    v, r = loaned.agent.pay_payee(sup, bk["unspent_principal"] + bk["earned_free_cash"], "PO-1")
+    assert v.allowed and r.ok, v.reason
+    return r
+
+
 def test_revenue_stops_loan_goes_late_impaired_defaulted_cover_pays_and_recovery_runs(loaned):
-    s = loaned.state()
-    # the business pulls out everything it is allowed to and then its revenue dries up
-    v, r = loaned.agent.withdraw(s["lockbox"]["free_cash"])
-    assert r.ok
+    # the business spends the loan on stock and then its revenue dries up
+    _spend_principal(loaned)
     vault_before = loaned.state()["vault"]["total"]
     cover_before = loaned.state()["broker"]["cover"]
     acts = loaned.run(6 * 120 + 600, step=30, revenue_per_step=0)
@@ -124,10 +139,8 @@ def test_revenue_stops_loan_goes_late_impaired_defaulted_cover_pays_and_recovery
 
 
 def _stress(loaned, top_up_xrp):
-    """Borrower takes all the free cash, pays the first installment from what is left, then revenue nearly stops."""
-    s = loaned.state()
-    v, r = loaned.agent.withdraw(s["lockbox"]["free_cash"])
-    assert r.ok
+    """Borrower spends all it may with a supplier, pays the first installment from what is left, then revenue nearly stops."""
+    _spend_principal(loaned)
     loaned.run(100, step=10)  # first installment is collected at the lead time
     assert loaned.state()["loan"]["remaining"] == 5
     if top_up_xrp:

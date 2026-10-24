@@ -167,7 +167,14 @@ class SimChain:
             return self._log(tx, "temUNKNOWN")
         if self.accounts[acct].balance < int(tx.get("Fee", 10)):
             return self._log(tx, "terINSUF_FEE_B")
-        return fn(tx)
+        before = {a: x.balance for a, x in self.accounts.items()}
+        r = fn(tx)
+        nodes = r.meta.setdefault("AffectedNodes", [])
+        for a, x in self.accounts.items():
+            if x.balance != before.get(a, 0):
+                nodes.append({"ModifiedNode": {"LedgerEntryType": "AccountRoot", "FinalFields": {"Account": a, "Balance": str(x.balance)},
+                                               "PreviousFields": {"Balance": str(before.get(a, 0))}}})
+        return r
 
     def _do_Payment(self, tx: dict) -> Result:
         amt = int(tx["Amount"])

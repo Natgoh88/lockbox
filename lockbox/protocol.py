@@ -13,6 +13,7 @@ from xrpl.models.transactions import (
     LoanManage,
     LoanPay,
     LoanSet,
+    Memo,
     Payment,
     SignerListSet,
     VaultCreate,
@@ -131,7 +132,13 @@ def lockdown_disable_master(lockbox: str) -> AccountSet:
     return AccountSet(account=lockbox, set_flag=AccountSetAsfFlag.ASF_DISABLE_MASTER)
 
 
-def payment(account: str, destination: str, drops: int) -> Payment:
+def memo(data: str, memo_type: str | None = None) -> Memo:
+    return Memo(memo_data=data.encode().hex().upper(), memo_type=memo_type.encode().hex().upper() if memo_type else None)
+
+
+def payment(account: str, destination: str, drops: int, memos: list[Memo] | None = None) -> Payment:
+    if memos:
+        return Payment(account=account, destination=destination, amount=str(drops), memos=memos)
     return Payment(account=account, destination=destination, amount=str(drops))
 
 
