@@ -15,11 +15,17 @@ Then the rulebook's hold-backs are carved out of what is there: the account rese
 buffer, then the next installment(s). What is left of earned money is the earned free cash, the only
 money the borrower may send to its own wallet.
 
-Pure: same history, same balance, same config, same loan facts -> same buckets. Anyone can recompute it.
+It also measures revenue (buyer payments, not principal, refunds or bond) in each whole payment
+interval since the loan started, so the rulebook can freeze withdrawals when revenue falls short.
+
+Pure: same history, same balance, same config, same loan facts, same clock -> same buckets.
+Anyone can recompute it.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from .units import ripple_to_unix
 
 BOND_MEMO = "bond"
 
@@ -67,9 +73,13 @@ class Buckets:
     earned_free_cash: int
     shortfall: int  # how far the balance falls short of everything held back, 0 when healthy
     paid_to_payees: dict[str, int] = field(default_factory=dict)
+    revenue_by_interval: tuple[int, ...] = ()  # revenue in each whole payment interval since the loan started
+    short_streak: int = 0  # whole intervals in a row, ending with the latest, where revenue was below the installment
+    revenue_by_interval: tuple[int, ...] = ()  # revenue in each whole payment interval since the loan started
+    short_streak: int = 0  # whole intervals in a row, ending with the latest, where revenue was below the installment
 
     def to_dict(self) -> dict:
-        return {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.__dict__.items()}
+        return {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, tuple) else v) for k, v in self.__dict__.items()}
 
 
 # ---- reading one history entry ----
@@ -171,13 +181,31 @@ PAYEE_ORDER = ("principal", "earned", "holdback", "bond")
 RECOVERY_ORDER = ("bond", "holdback", "earned", "principal")
 
 
-def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts) -> Buckets:
+def _ts(e: dict) -> int | None:
+    date = _tx(e).get("date", e.get("date"))
+    return ripple_to_unix(int(date)) if date is not None else None
+
+
+def _streak(revenue: tuple[int, ...], installment: int) -> int:
+    n = 0
+    for r in reversed(revenue):
+        if r >= installment:
+            break
+        n += 1
+    return n
+
+
+def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts, now: int | None = None) -> Buckets:
+    """now is the ledger clock (unix seconds). Without it revenue per interval is not measured."""
     lb = cfg.lockbox
     ordered = _ordered([e for e in entries if e.get("validated", True)])
     deltas = [balance_delta(e, lb) for e in ordered]
     pools = _Pools(balance - sum(deltas))
     paid: dict[str, int] = {}
     loan_seen = False
+    loan_start: int | None = None
+    interval = 0
+    revenue: list[tuple[int | None, int]] = []
 
     for e, d in zip(ordered, deltas):
         if d == 0:
@@ -193,6 +221,8 @@ def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts) -> B
                 pools.p["principal"] = pools.p["holdback"] = 0
                 pools.add("principal", d)
                 loan_seen = True
+                loan_start, interval, revenue = _ts(e), int(tx.get("PaymentInterval", 0) or 0), []
+                loan_start, interval, revenue = _ts(e), int(tx.get("PaymentInterval", 0) or 0), []
             elif ok and ttype == "Payment" and BOND_MEMO in memo_texts(tx):
                 pools.add("bond", d)
             elif ok and ttype == "Payment" and sender in cfg.approved_payees:
@@ -201,6 +231,8 @@ def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts) -> B
                 held = d * cfg.holdback_bps // 10_000 if loan_seen else 0
                 pools.add("holdback", held)
                 pools.add("earned", d - held)
+                if loan_seen and ok and ttype == "Payment":
+                    revenue.append((_ts(e), d))
             continue
         out = -d
         dest = tx.get("Destination")
@@ -237,9 +269,18 @@ def replay(entries: list[dict], balance: int, cfg: Config, loan: LoanFacts) -> B
     inst = loan.installment * min(cfg.reserve_installments, loan.payment_remaining) if loan.active else 0
     short = carve(cfg.account_reserve + cfg.fee_buffer, ("earned", "holdback", "principal", "bond"))
     short += carve(inst, ("holdback", "earned", "principal"))
+    by_interval: tuple[int, ...] = ()
+    if loan.active and loan_start is not None and interval > 0 and now is not None and now >= loan_start:
+        sums = [0] * ((now - loan_start) // interval)  # whole intervals only
+        for ts, drops in revenue:
+            k = (ts - loan_start) // interval if ts is not None else -1
+            if 0 <= k < len(sums):
+                sums[k] += drops
+        by_interval = tuple(sums)
     return Buckets(balance=balance, reserve=cfg.account_reserve, fee_buffer=cfg.fee_buffer, bond=max(0, p["bond"]),
                    installment_reserve=inst, holdback=max(0, p["holdback"]), unspent_principal=max(0, p["principal"]),
-                   earned_free_cash=max(0, p["earned"]), shortfall=short, paid_to_payees=paid)
+                   earned_free_cash=max(0, p["earned"]), shortfall=short, paid_to_payees=paid, revenue_by_interval=by_interval,
+                   short_streak=_streak(by_interval, loan.installment))
 
 
 def from_balance(balance: int, cfg: Config, loan: LoanFacts) -> Buckets:

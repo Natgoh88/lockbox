@@ -31,7 +31,9 @@ class Params:
     max_fee_drops: int = 1_000
     fee_buffer_drops: int = 5_000
     pay_allowance_drops: int = 10_000
-    reserve_installments: int = 1
+    reserve_installments: int = 1  # holdback: whole installments kept back
+    holdback_bps: int = 0  # holdback: share of each revenue payment kept back while a loan is open (basis points)
+    freeze_after_short_intervals: int = 2
     pay_lead_fraction: float = 0.25  # collect when this close to the due date (fraction of the interval)
 
 
@@ -75,14 +77,15 @@ class PolicyService:
         p = self.params
         balance, reserve = self.b.balance(self.lockbox), self.b.reserve(self.lockbox)
         cfg = buckets.Config(lockbox=self.lockbox, lender=self.lender, approved_payees=dict(p.approved_payees), account_reserve=reserve,
-                             fee_buffer=p.fee_buffer_drops, reserve_installments=p.reserve_installments)
-        bk = buckets.replay(self.b.account_tx(self.lockbox), balance, cfg, covenant.loan_facts(loan, self.recovery_remaining))
+                             fee_buffer=p.fee_buffer_drops, reserve_installments=p.reserve_installments, holdback_bps=p.holdback_bps)
+        bk = buckets.replay(self.b.account_tx(self.lockbox), balance, cfg, covenant.loan_facts(loan, self.recovery_remaining), now=self.b.now())
         return CovenantContext(
             lockbox=self.lockbox, lender=self.lender, loan=loan, balance_drops=balance,
             account_reserve_drops=reserve, now=self.b.now(), allowlist=set(p.allowlist),
             accepted=self.accepted, recovery_remaining=self.recovery_remaining, max_fee_drops=p.max_fee_drops,
             fee_buffer_drops=p.fee_buffer_drops, pay_allowance_drops=p.pay_allowance_drops, reserve_installments=p.reserve_installments,
-            approved_payees=dict(p.approved_payees), buckets=bk,
+            approved_payees=dict(p.approved_payees), buckets=bk, holdback_bps=p.holdback_bps,
+            freeze_after_short_intervals=p.freeze_after_short_intervals,
         )
 
     def review(self, tx: dict) -> Verdict:
@@ -273,7 +276,7 @@ class Servicer:
                 acts.append("impair")
             # if cash has come back during the grace period, collect with the late-payment flag
             spendable = self.b.balance(self.lockbox) - self.b.reserve(self.lockbox)
-            if spendable >= ln.installment + 100 and self.late_attempts.get(ln.next_due, 0) < 3:
+            if spendable >= ln.installment + 2 * self.policy.params.max_fee_drops and self.late_attempts.get(ln.next_due, 0) < 3:
                 self.late_attempts[ln.next_due] = self.late_attempts.get(ln.next_due, 0) + 1
                 tx = self.b.prepare(P.as_dict(P.loan_pay(self.lockbox, self.loan_id, ln.installment, late=True)), signers_count=2)
                 r = self._submit_with_referee(tx)
@@ -286,7 +289,7 @@ class Servicer:
         if now >= ln.next_due - lead and self.last_pay_attempt != ln.next_due:
             self.last_pay_attempt = ln.next_due
             spendable = self.b.balance(self.lockbox) - self.b.reserve(self.lockbox)
-            if spendable < ln.installment + 100:
+            if spendable < ln.installment + 2 * self.policy.params.max_fee_drops:
                 events.emit("short", ts=now, balance=self.b.balance(self.lockbox), need=ln.installment)
                 acts.append("short")
                 return acts

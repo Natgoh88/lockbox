@@ -67,9 +67,11 @@ def test_withdrawal_to_unlisted_address_refused():
     assert "destination_allowlisted" in failed(evaluate(send(to="rThief"), ctx()))
 
 
-def test_withdrawal_frozen_when_impaired_or_late():
-    assert "loan_current" in failed(evaluate(send(), ctx(loan=loan(impaired=True))))
+def test_withdrawal_frozen_when_late_but_not_by_the_impaired_flag():
+    # M2: freezes come from ledger facts only. The lender's impaired flag alone must not freeze a current borrower.
+    assert evaluate(send(), ctx(loan=loan(impaired=True))).allowed
     assert "loan_current" in failed(evaluate(send(), ctx(now=1001)))
+    assert "loan_current" in failed(evaluate(send(), ctx(now=1001, loan=loan(impaired=True))))
 
 
 def test_no_loan_means_only_reserve_and_buffer_held_back():

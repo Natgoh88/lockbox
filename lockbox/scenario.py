@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from . import events, health, protocol as P
+from . import covenant, events, health, protocol as P
 from .backend import Backend, Result, addr_of
 from .covenant import free_cash
 from .inflows import parse_account_tx
@@ -156,5 +156,6 @@ class Scenario:
                                               "declines": o.declines, "buckets": o.metrics.buckets},
             "recovery_remaining": self.policy.recovery_remaining,
             "buckets": ctx.buckets.to_dict() if ctx.buckets else None,
+            "frozen": covenant.frozen_reasons(ctx),
             "approved_payees": {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in self.params.approved_payees.items()},
         }

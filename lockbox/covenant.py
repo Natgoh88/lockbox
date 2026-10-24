@@ -14,8 +14,15 @@ The referee's rules are below. They are plain checks, no model, and they fail cl
   LoanPay   the right loan, the right amount, no special flags. Lender + referee can autopay.
   Payment   to an approved payee (supplier): only with its invoice memo, within its cap, out of
             unspent principal (and earned free cash)
-            to the borrower's own wallet: only out of earned free cash, only while the loan is current
+            to the borrower's own wallet: only out of earned free cash
             to the lender: only after default, only up to what was owed (recovery)
+
+Borrower payments freeze on ledger facts only: an installment is past due, or revenue fell short of
+the installment for two whole intervals in a row. The lender's impaired flag does NOT freeze anything,
+so a lender cannot use it to squeeze a healthy borrower.
+
+The XRP fee reserve is never spent: free cash and principal are measured after the account reserve
+and the fee buffer, and a LoanPay must leave the account reserve plus one more fee.
 
 Where the money belongs (reserve, installment reserve, unspent principal, earned free cash) is
 rebuilt from the ledger history by buckets.py.
@@ -84,6 +91,8 @@ class CovenantContext:
     fee_buffer_drops: int = 5_000
     pay_allowance_drops: int = 10_000  # LoanPay may exceed the installment by at most this much
     reserve_installments: int = 1
+    holdback_bps: int = 0  # share of each revenue payment held back while a loan is open
+    freeze_after_short_intervals: int = 2
     approved_payees: dict[str, Payee] = field(default_factory=dict)
     buckets: Buckets | None = None  # rebuilt from history by the caller; without it every drop counts as earned
 
@@ -141,7 +150,8 @@ def buckets_of(ctx: CovenantContext) -> Buckets:
     if ctx.buckets is not None:
         return ctx.buckets
     cfg = bk.Config(lockbox=ctx.lockbox, lender=ctx.lender, approved_payees=dict(ctx.approved_payees),
-                    account_reserve=ctx.account_reserve_drops, fee_buffer=ctx.fee_buffer_drops, reserve_installments=ctx.reserve_installments)
+                    account_reserve=ctx.account_reserve_drops, fee_buffer=ctx.fee_buffer_drops, reserve_installments=ctx.reserve_installments,
+                    holdback_bps=ctx.holdback_bps)
     return bk.from_balance(ctx.balance_drops, cfg, loan_facts(ctx.loan, ctx.recovery_remaining))
 
 
@@ -161,10 +171,27 @@ def _int(tx: dict, key: str) -> int:
     return int(v) if (isinstance(v, int) or _is_drops(v)) else -1
 
 
+def frozen_reasons(ctx: CovenantContext) -> list[str]:
+    """Ledger facts that freeze borrower payments. Never the lender's impaired flag."""
+    loan = ctx.loan
+    out = []
+    if loan is not None and loan.active:
+        if ctx.now > loan.next_due:
+            out.append("past_due")
+        if buckets_of(ctx).short_streak >= ctx.freeze_after_short_intervals:
+            out.append("revenue_short")
+    if in_default(ctx):
+        out.append("in_default")
+    return out
+
+
 def _not_frozen(add, ctx: CovenantContext) -> None:
     loan = ctx.loan
     if loan is not None and loan.active:
-        add("loan_current", not loan.impaired and ctx.now <= loan.next_due, "loan is impaired or past due, withdrawals are frozen")
+        add("loan_current", ctx.now <= loan.next_due, "an installment is past due, withdrawals are frozen")
+        streak = buckets_of(ctx).short_streak
+        add("revenue_covers_installment", streak < ctx.freeze_after_short_intervals,
+            f"revenue was below the installment {streak} intervals in a row, withdrawals are frozen")
     if in_default(ctx):
         add("not_in_default", False, "the loan defaulted and recovery is still pending")
 
@@ -215,7 +242,9 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
             ok = _is_drops(amt) and loan.installment <= int(amt) <= loan.installment + ctx.pay_allowance_drops
             add("amount_matches_installment", ok, f"amount {amt}, installment {loan.installment} (+{ctx.pay_allowance_drops} allowed)")
             if _is_drops(amt):
-                add("covered_by_balance", ctx.balance_drops - int(amt) >= ctx.account_reserve_drops, "would go below the account reserve")
+                floor = ctx.account_reserve_drops + ctx.max_fee_drops
+                left = ctx.balance_drops - int(amt) - (int(fee) if _is_drops(fee) else 0)
+                add("covered_by_balance", left >= floor, f"would leave {left}, must keep the account reserve plus one fee ({floor})")
 
     elif ttype == "Payment":
         dest = tx.get("Destination")
