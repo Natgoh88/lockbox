@@ -6,3 +6,4 @@ data/state.json
 data/events.jsonl
 *.log
 data/payees.json
+data/events-*.jsonl
