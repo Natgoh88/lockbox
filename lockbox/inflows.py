@@ -1,7 +1,8 @@
 """Turn raw account_tx history into a clean list of incoming XRP payments.
 
 Only evidence we can defend is kept: validated, successful Payments to the account, XRP only,
-measured by what was DELIVERED (not what the Amount field says), excluding self payments and
+measured by what was DELIVERED (not what the Amount field says), excluding self payments,
+the payment that created the account (an opening deposit, often a faucet, is not revenue) and
 any sender we are told to ignore (for example the vault paying out loan principal).
 """
 from __future__ import annotations
@@ -30,6 +31,15 @@ def _close_time(entry: dict, tx: dict) -> int | None:
     return None
 
 
+def created_account(meta: dict, account: str) -> bool:
+    """True if this transaction created the account's AccountRoot (its opening deposit)."""
+    for n in meta.get("AffectedNodes", []):
+        c = n.get("CreatedNode", {})
+        if c.get("LedgerEntryType") == "AccountRoot" and c.get("NewFields", {}).get("Account") == account:
+            return True
+    return False
+
+
 def parse_account_tx(entries: list[dict], account: str, ignore_senders: set[str] | None = None) -> list[Inflow]:
     """entries = result["transactions"] from an account_tx call (API v1 or v2 shape)."""
     ignore = ignore_senders or set()
@@ -43,7 +53,7 @@ def parse_account_tx(entries: list[dict], account: str, ignore_senders: set[str]
             continue
         if tx.get("Account") == account or tx.get("Account") in ignore:
             continue
-        if meta.get("TransactionResult") != "tesSUCCESS":
+        if meta.get("TransactionResult") != "tesSUCCESS" or created_account(meta, account):
             continue
         delivered = meta.get("delivered_amount", meta.get("DeliveredAmount"))
         if not isinstance(delivered, str) or not delivered.isdigit():
