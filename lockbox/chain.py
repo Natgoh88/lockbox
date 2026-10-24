@@ -1,6 +1,6 @@
 """The real ledger: a Backend over xrpl-py's JSON-RPC client. Written against the xrpl.org lending
-tutorials and xrpl-py 5.x. NOT run against Devnet yet (the sandbox it was built in cannot reach XRPL),
-so expect a small fix or two on the first run. Everything above this file is tested on the sim.
+tutorials and xrpl-py 5.x, and fixed on the first Devnet run (see README "First Devnet run").
+Everything above this file is tested on the sim.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from xrpl.clients import JsonRpcClient
-from xrpl.models.requests import AccountInfo, AccountTx, Feature, Ledger, LedgerEntry, ServerInfo
+from xrpl.models.requests import AccountInfo, AccountTx, Feature, Ledger, LedgerCurrent, LedgerEntry, ServerInfo
 from xrpl.models.requests.vault_info import VaultInfo
 from xrpl.models.transactions import LoanSet, Transaction
 from xrpl.transaction import (
@@ -25,7 +25,7 @@ from xrpl.transaction import (
 from xrpl.wallet import Wallet, generate_faucet_wallet
 
 from .backend import Result, addr_of
-from .covenant import LoanView
+from .covenant import APPROVAL_WINDOW, LoanView
 from .health import BrokerView, VaultView
 from .units import RATE_UNITS, ripple_to_unix
 
@@ -69,6 +69,15 @@ class XrplChain:
             return ct
         except Exception:
             return int(t)
+
+    def ledger_index(self) -> int:
+        """The current open ledger, the referee's clock for LastLedgerSequence."""
+        return int(self.c.request(LedgerCurrent()).result["ledger_current_index"])
+
+    def next_sequence(self, addr: str) -> int:
+        """Sequence the account's next transaction must use, counting ones already queued."""
+        res = self.c.request(AccountInfo(account=addr, ledger_index="current")).result
+        return int(res["account_data"]["Sequence"])
 
     def _info(self, addr: str, **kw) -> dict:
         return self.c.request(AccountInfo(account=addr, ledger_index="validated", **kw)).result
@@ -139,6 +148,8 @@ class XrplChain:
 
     # ---- writes ----
     def prepare(self, tx: dict, signers_count: int = 0) -> dict:
+        if "LastLedgerSequence" not in tx:  # autofill would use +20, the referee signs at most APPROVAL_WINDOW ahead
+            tx = {**tx, "LastLedgerSequence": self.ledger_index() + APPROVAL_WINDOW}
         model = Transaction.from_xrpl(tx)
         filled = autofill(model, self.c, signers_count or None)
         return filled.to_xrpl()

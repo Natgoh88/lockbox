@@ -64,3 +64,36 @@ def test_single_key_account_uses_a_plain_signature():
     tx["Fee"] = "12"
     assert c.submit(tx, [w]).ok
     assert c.sent[0].txn_signature and not c.sent[0].signers
+
+
+class FakeClient:
+    """Answers the two requests the referee's clock needs with the shapes Devnet returns."""
+    def __init__(self, ledger=6385720, seq=6385567):
+        self.ledger, self.seq, self.asked = ledger, seq, []
+
+    def request(self, req):
+        self.asked.append(req)
+        name = type(req).__name__
+        res = {"LedgerCurrent": {"ledger_current_index": self.ledger, "status": "success"},
+               "AccountInfo": {"account_data": {"Sequence": self.seq, "Balance": "1"}, "ledger_current_index": self.ledger}}[name]
+        return type("Response", (), {"result": res})()
+
+
+def test_ledger_clock_and_next_sequence_for_the_referee():
+    c = XrplChain("http://127.0.0.1:1")
+    c.c = FakeClient()
+    assert c.ledger_index() == 6385720
+    assert c.next_sequence("rAnyone") == 6385567
+    assert c.c.asked[-1].ledger_index == "current"  # queued transactions count
+
+
+def test_prepare_keeps_last_ledger_inside_the_referee_window(monkeypatch):
+    import lockbox.chain as chain
+    from lockbox.covenant import APPROVAL_WINDOW
+    monkeypatch.setattr(chain, "autofill", lambda model, client, n: model)  # no network: keep what prepare set
+    c = XrplChain("http://127.0.0.1:1")
+    c.c = FakeClient()
+    w, dest = Wallet.create(), Wallet.create()
+    tx = {**P.as_dict(P.payment(w.address, dest.address, 1000)), "Fee": "12", "Sequence": 5}
+    assert c.prepare(tx)["LastLedgerSequence"] == 6385720 + APPROVAL_WINDOW
+    assert c.prepare({**tx, "LastLedgerSequence": 6385722})["LastLedgerSequence"] == 6385722  # a caller's choice is kept
