@@ -257,7 +257,8 @@ function render() {
   const rb = S.rulebook;
   $('rb').innerHTML = rb ? `Rulebook <b>${rb.name} v${rb.version}</b>, fingerprint <span class="rule">${(rb.fingerprint || '').slice(0, 16)}...</span>. The same fingerprint is written in the loan broker's Data field on the ledger.` : 'Rulebook: not set';
   $('b-sup').disabled = !S.has_loan || !Object.keys(S.approved_payees || {}).length;
-  $('b-own').disabled = !S.has_loan;
+  $('b-own').disabled = !S.has_loan || !(bk.unspent_principal > 0);
+  $('b-own').title = bk.unspent_principal > 0 ? `asks for everything the owner may take plus ${xrp(bk.unspent_principal)} XRP of loan money` : 'no loan money left in the lockbox';
   $('b-payoff').disabled = !S.has_loan || ['paid', 'defaulted'].includes(S.status);
   $('b-release').disabled = !locked;
   $('g-sim').style.display = S.mode === 'sim' ? '' : 'none';

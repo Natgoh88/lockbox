@@ -72,15 +72,20 @@ def persist():
         devnet.persist(sc())
 
 
+REVENUE_EVERY = 30  # seconds between buyer payments, whatever the tick rate
+
+
 def autopilot():
+    last_revenue = 0.0
     while True:
-        time.sleep(15)
+        time.sleep(5)  # often, so the servicer catches up as soon as a button press releases the lock
         if MODE == "sim" or not AUTO["autopilot"]:
             continue
         try:
             with LOCK:
                 s = sc()
-                if AUTO["revenue"] and s.servicer and s.servicer.loan_id:
+                if AUTO["revenue"] and s.servicer and s.servicer.loan_id and time.time() - last_revenue >= REVENUE_EVERY:
+                    last_revenue = time.time()
                     try:
                         s.earn(xrp_to_drops(AUTO["revenue_xrp"] * random.uniform(0.8, 1.2)), random.randint(0, 1))
                     except RuntimeError as e:  # a buyer out of test XRP must never skip the servicer tick
@@ -189,11 +194,16 @@ def withdraw(b: Body):
 
 @app.post("/api/own_wallet")
 def own_wallet():
-    """Send the loan money (unspent principal) to the business's own wallet. The referee should refuse."""
+    """Try to take the loan money home: everything the owner may withdraw (earned free cash plus its own money)
+    PLUS the unspent loan money. Money is interchangeable, so asking for only the loan's size can be covered by the
+    owner's own cash and is rightly allowed. The referee refuses whenever any loan money is left."""
     def go():
         s = sc()
-        bk = s.state()["buckets"] or {}
-        amt = bk.get("unspent_principal") or xrp_to_drops(1)
+        st = s.state()
+        bk = st["buckets"] or {}
+        if not bk.get("unspent_principal"):
+            raise HTTPException(400, "no unspent loan money left in the lockbox")
+        amt = st["lockbox"]["free_cash"] + bk["unspent_principal"]
         v, r = s.agent.withdraw(amt)
         return {"amount": amt, "verdict": v.to_dict(), "ok": bool(r and r.ok)}
     return guarded(go)
