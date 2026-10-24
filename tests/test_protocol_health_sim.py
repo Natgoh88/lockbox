@@ -25,7 +25,7 @@ def test_builders_produce_expected_json():
     assert P.as_dict(P.loan_manage(a, "B" * 64, "impair"))["Flags"] == 131072
     assert P.as_dict(P.loan_manage(a, "B" * 64, "default"))["Flags"] == 65536
     sl = P.as_dict(P.lockdown_signer_list(a, b, addr(), addr()))
-    assert sl["SignerQuorum"] == 2 and len(sl["SignerEntries"]) == 3
+    assert sl["SignerQuorum"] == 3 and len(sl["SignerEntries"]) == 3  # M1: referee weight 2, others 1
     assert P.as_dict(P.lockdown_disable_master(a))["SetFlag"] == 4
 
 
@@ -77,7 +77,8 @@ def test_sim_signer_quorum_and_master_key():
         c.fund(x, 20_000_000)
     r = c.submit(c.prepare(P.as_dict(P.payment(a, other, 1_000))), [a])
     assert r.ok
-    c.submit(c.prepare(P.as_dict(P.lockdown_signer_list(a, b, p, addr()))), [a])
+    # M1: p is the referee (weight 2), b the borrower (weight 1), quorum 3
+    c.submit(c.prepare(P.as_dict(P.lockdown_signer_list(a, b, addr(), p))), [a])
     # master still on: the owner can still move funds
     assert c.submit(c.prepare(P.as_dict(P.payment(a, other, 1_000))), [a]).ok
     assert c.submit(c.prepare(P.as_dict(P.lockdown_disable_master(a))), [a]).ok

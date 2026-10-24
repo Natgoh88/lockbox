@@ -106,12 +106,24 @@ def loan_manage(account: str, loan_id: str, action: str) -> LoanManage:
 
 # ---- the lockbox ----
 
+REFEREE_WEIGHT = 2
+PARTY_WEIGHT = 1
+LOCKBOX_QUORUM = 3
+
+
+def lockbox_signer_weights(borrower_signer: str, lender_signer: str, policy_signer: str) -> dict[str, int]:
+    """Referee 2, borrower 1, lender 1, quorum 3: every working pair includes the referee, so borrower
+    and lender together cannot move money around the rulebook."""
+    return {borrower_signer: PARTY_WEIGHT, lender_signer: PARTY_WEIGHT, policy_signer: REFEREE_WEIGHT}
+
+
 def lockdown_signer_list(lockbox: str, borrower_signer: str, lender_signer: str, policy_signer: str) -> SignerListSet:
-    """2-of-3: borrower agent, lender servicer, policy referee. Any two move money."""
+    """Referee plus one other: referee + borrower (withdraw, LoanSet) or referee + lender (collect, recover)."""
+    weights = lockbox_signer_weights(borrower_signer, lender_signer, policy_signer)
     return SignerListSet(
         account=lockbox,
-        signer_quorum=2,
-        signer_entries=[SignerEntry(account=a, signer_weight=1) for a in (borrower_signer, lender_signer, policy_signer)],
+        signer_quorum=LOCKBOX_QUORUM,
+        signer_entries=[SignerEntry(account=a, signer_weight=w) for a, w in weights.items()],
     )
 
 

@@ -112,7 +112,8 @@ class BorrowerAgent:
         return addr_of(self.key)
 
     def lock(self, lender_addr: str, policy_addr: str) -> list[Result]:
-        """Make the lockbox 2-of-3, then switch off its master key. After this the seed in lockbox_key cannot move funds."""
+        """Install the weighted signer list (referee required), then switch off the master key. After this the seed
+        in lockbox_key cannot move funds."""
         out = []
         for tx in (P.lockdown_signer_list(self.lockbox, self.address, lender_addr, policy_addr), P.lockdown_disable_master(self.lockbox)):
             r = self.b.submit(self.b.prepare(P.as_dict(tx)), [self.lockbox_key])
@@ -170,12 +171,16 @@ class Servicer:
     def verify_lockbox(self) -> list[tuple[str, bool]]:
         """Read the lockbox's on-ledger state. The lender does not trust the borrower's word, only the ledger."""
         s = self.b.lockbox_state(self.lockbox)
-        want = {self.borrower_addr, self.address, self.policy_addr}
+        signers, quorum = s["signers"], s["quorum"]
+        want = P.lockbox_signer_weights(self.borrower_addr, self.address, self.policy_addr)
+        without_referee = sum(w for a, w in signers.items() if a != self.policy_addr)
         checks = [
             ("master key disabled", bool(s["master_disabled"])),
             ("no regular key", not s.get("regular_key")),
-            ("signer quorum is 2", s["quorum"] == 2),
-            ("signers are exactly borrower, lender, policy, weight 1 each", set(s["signers"]) == want and all(w == 1 for w in s["signers"].values())),
+            (f"signer quorum is {P.LOCKBOX_QUORUM}", quorum == P.LOCKBOX_QUORUM),
+            ("signers are exactly borrower, lender, policy", set(signers) == set(want)),
+            (f"weights: referee {P.REFEREE_WEIGHT}, borrower {P.PARTY_WEIGHT}, lender {P.PARTY_WEIGHT}", signers == want),
+            ("no payment possible without the referee", 0 < quorum and without_referee < quorum),
         ]
         events.emit("verify_lockbox", ts=self.b.now(), checks=[{"name": n, "ok": ok} for n, ok in checks])
         return checks
