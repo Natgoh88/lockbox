@@ -14,7 +14,7 @@ import pathlib
 import time
 from dataclasses import dataclass, field
 
-from . import covenant, events, health, protocol as P
+from . import covenant, events, health, protocol as P, verify
 from .backend import Backend, Result, addr_of
 from .covenant import free_cash
 from .inflows import funded_by, parse_account_tx, repaid_loans
@@ -120,6 +120,39 @@ class Scenario:
     def approve_payee(self, address: str, cap_drops: int, invoice_ref: str) -> None:
         assert self.servicer is not None
         self.servicer.approve_payee(address, cap_drops, invoice_ref)
+
+    def restore_payees(self, payees: dict, rulebook_file) -> int:
+        """After a restart, put back the approved-supplier list ({address: {"cap_drops", "invoice_ref"}}) without
+        approving anything new. Only if it is exactly approved_suppliers in the published rulebook file, the file's
+        fingerprint is the one in the broker's Data field on the ledger, and (with a loan on the ledger) the file's
+        agreement hash is the one in the LoanSet's Data field. Otherwise raises RuntimeError and changes nothing."""
+        path = pathlib.Path(rulebook_file)
+        if not path.is_file():
+            raise RuntimeError(f"no published rulebook file at {path}")
+        doc = json.loads(path.read_text())
+        broker_data = self.b.broker_view(self.broker_id).data if self.broker_id else None
+        loanset = None
+        for e in self.b.account_tx(self.lockbox):
+            tx, meta = e.get("tx_json") or e.get("tx") or {}, e.get("meta") or {}
+            if tx.get("TransactionType") == "LoanSet" and tx.get("Counterparty") == self.lockbox \
+                    and meta.get("TransactionResult") == "tesSUCCESS" and (loanset is None or e.get("ledger_index", 0) >= loanset[0]):
+                loanset = (e.get("ledger_index", 0), tx.get("Data"))
+        problems = verify.rulebook_problems(doc, broker_data, loanset[1] if loanset else None)
+        if loanset and "agreement_hash" not in doc:
+            problems.append("the file has no agreement hash for the loan on the ledger")
+        try:
+            want = covenant.payees_from_json(payees)
+            published = covenant.payees_from_json(doc.get("approved_suppliers", {}))
+        except (KeyError, TypeError, ValueError) as e:
+            raise RuntimeError(f"supplier list is malformed: {e}") from None
+        if want != published:
+            problems.append("the supplier list is not exactly the one in the published rulebook file")
+        if problems:
+            raise RuntimeError("refusing to restore the approved suppliers: " + "; ".join(problems))
+        self.params.approved_payees.clear()
+        self.params.approved_payees.update(want)
+        events.emit("restore_payees", ts=self.b.now(), count=len(want), fingerprint=doc.get("fingerprint"))
+        return len(want)
 
     def post_bond(self, drops: int) -> Result:
         return self.agent.post_bond(drops)
