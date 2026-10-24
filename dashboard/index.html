@@ -55,14 +55,21 @@
   .checks { display:flex; gap:4px 12px; flex-wrap:wrap; margin-top:4px; font-size:12px; color:var(--mute); }
   .checks .ok::before{content:"\2713 ";color:var(--ok);font-weight:700;} .checks .no::before{content:"\2717 ";color:var(--bad);font-weight:700;} .checks .no{color:var(--bad);}
   .empty { color:var(--mute); padding:12px 0; }
+  .card.ref { border:2px solid var(--accent); }
+  .card.ref h2 { color:var(--accent); font-size:13px; }
+  .rule { font:13px var(--mono); }
+  .vt { width:100%; border-collapse:collapse; font-size:12px; margin:6px 0 4px; }
+  .vt th, .vt td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .vt th { color:var(--mute); font-weight:600; }
+  details.checks-d summary { cursor:pointer; font-size:12px; color:var(--mute); margin-top:4px; }
   .toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:9px 16px; border-radius:8px; font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none; max-width:90vw; }
   .toast.on { opacity:1; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Lockbox</h1>
-  <span class="tag">An exporter borrows against what its foreign buyers are about to pay. The account itself enforces repayment.</span>
+  <h1>Lockbox: a referee that makes loan agreements enforceable on XRPL</h1>
+  <span class="tag">Every payment from the borrower's account needs the referee, which follows a public rulebook anyone can verify.</span>
   <span class="net" id="net">connecting</span>
 </header>
 <main>
@@ -105,6 +112,13 @@
     </div>
   </div>
   <div class="col">
+    <div class="card ref">
+      <h2>The referee</h2>
+      <div class="small" id="rb">Rulebook: loading</div>
+      <div class="btns" style="margin:10px 0"><button id="b-verify" class="pri">Verify the referee</button></div>
+      <div id="verify"></div>
+      <ul class="feed" id="decisions"><li class="empty">No decisions yet. Every payment from the lockbox shows up here with the rule that decided it.</li></ul>
+    </div>
     <div class="card">
       <h2>Loan</h2>
       <div id="loan"><div class="empty">No loan yet.</div></div>
@@ -114,7 +128,7 @@
       <div class="kv" id="lender"></div>
     </div>
     <div class="card">
-      <h2>Referee and activity</h2>
+      <h2>Ledger activity</h2>
       <ul class="feed" id="feed"><li class="empty">Nothing yet.</li></ul>
     </div>
   </div>
@@ -123,6 +137,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const xrp = d => (d / 1e6).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const amt = d => Math.abs(d) > 0 && Math.abs(d) < 10000 ? `${d} drops` : `${xrp(d)} XRP`;  // tiny amounts would read 0.00 XRP
 let since = 0, S = null, evs = [];
 const short = a => a ? a.slice(0, 6) + '...' + a.slice(-4) : '';
 
@@ -141,7 +156,11 @@ function statusChip(st) {
   return `<span class="chip ${m[st] || 'mute'}">${st}</span>`;
 }
 
-const when = t => t ? new Date(t * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '-';
+const when = t => {  // relative to the ledger's clock: the sim's calendar is not today's
+  if (!t || !S) return '-';
+  const m = Math.round((t - S.now) / 60);
+  return m > 0 ? `in ${m} min` : m < 0 ? `${-m} min ago` : 'now';
+};
 
 function quotes(o) {
   const u = o.unlocked || {};
@@ -170,6 +189,7 @@ function render() {
     ['reserve', 'ledger reserve', 'var(--mute)'], ['fee_buffer', 'fee buffer', 'var(--line)'], ['bond', 'bond', 'var(--bad)'],
     ['installment_reserve', 'next installment', 'var(--warn)'], ['holdback', 'holdback', '#c98a2b'],
     ['unspent_principal', 'unspent loan money', '#3d6fb6'], ['earned_free_cash', 'earned free cash', 'var(--accent)'],
+    ['owner_funds', "owner's own money", '#7b5ea7'],
   ];
   const tot = Math.max(1, parts.reduce((a, p) => a + (bk[p[0]] || 0), 0));
   $('stack').innerHTML = parts.map(p => `<i style="width:${(bk[p[0]] || 0) / tot * 100}%;background:${p[2]}" title="${p[1]}"></i>`).join('');
@@ -223,7 +243,7 @@ function render() {
     (B ? `<div><span class="small">First-loss cover</span><b>${xrp(B.cover)} XRP</b></div><div><span class="small">Debt outstanding</span><b>${xrp(B.debt)} XRP</b></div>` : '') +
     (V && V.loss_unrealized ? `<div><span class="small">Unrealized loss</span><b style="color:var(--warn)">${xrp(V.loss_unrealized)} XRP</b></div>` : '') +
     `<div><span class="small">Lender wallet</span><b>${xrp(S.lender_balance)} XRP</b></div>` +
-    (V && V.closed_ended ? `<div><span class="small">Closed-ended vault</span><b>deposits until ${when(V.subscription)}</b></div><div><span class="small">Depositors redeem from</span><b>${when(V.redemption)}</b></div>`
+    (V && V.closed_ended ? `<div><span class="small">Closed-ended vault: deposits close</span><b>${when(V.subscription)}</b></div><div><span class="small">Depositors can redeem</span><b>${when(V.redemption)}</b></div>`
       : V ? `<div><span class="small">Vault</span><b>open-ended</b></div>` : '') +
     `<div style="grid-column:1/-1"><span class="small">Who loses first if a loan defaults</span><b style="font-size:14px">1. the borrower's bond, 2. the broker's first-loss cover, 3. depositors</b></div>`;
 
@@ -231,8 +251,11 @@ function render() {
   $('b-quote').disabled = !locked || S.has_loan;
   $('b-borrow').disabled = !S.has_offer || !(S.offer && S.offer.approved) || S.has_loan;
   $('b-all').disabled = !locked;
-  $('b-free').disabled = !locked || !(bk.earned_free_cash > 0);
-  $('b-free').title = bk.earned_free_cash > 0 ? '' : 'no earned free cash right now';
+  const withdrawable = (bk.earned_free_cash || 0) + (bk.owner_funds || 0);  // the referee allows both to the owner's wallet
+  $('b-free').disabled = !locked || !(withdrawable > 0);
+  $('b-free').title = withdrawable > 0 ? `earned free cash plus owner's own money: ${xrp(withdrawable)} XRP` : "no earned free cash or owner's own money right now";
+  const rb = S.rulebook;
+  $('rb').innerHTML = rb ? `Rulebook <b>${rb.name} v${rb.version}</b>, fingerprint <span class="rule">${(rb.fingerprint || '').slice(0, 16)}...</span>. The same fingerprint is written in the loan broker's Data field on the ledger.` : 'Rulebook: not set';
   $('b-sup').disabled = !S.has_loan || !Object.keys(S.approved_payees || {}).length;
   $('b-own').disabled = !S.has_loan;
   $('b-payoff').disabled = !S.has_loan || ['paid', 'defaulted'].includes(S.status);
@@ -242,20 +265,47 @@ function render() {
   if (S.auto) { $('b-rev').textContent = 'Revenue: ' + (S.auto.revenue ? 'on' : 'off'); $('b-auto').textContent = 'Servicer: ' + (S.auto.autopilot ? 'on' : 'off'); }
 }
 
+function label(a) {
+  if (!S) return short(a);
+  if (a === S.lockbox.address) return 'lockbox';
+  if (S.approved_payees && S.approved_payees[a]) return 'approved supplier';
+  if (a === S.payout_address) return "owner's wallet";
+  if (a === S.lender_address) return 'lender';
+  return short(a);
+}
+
+async function verifyReferee() {
+  $('verify').innerHTML = '<div class="small">Checking the rulebook against the ledger and replaying every decision...</div>';
+  try {
+    const r = await fetch('/api/verify'); const j = await r.json();
+    if (!r.ok) { $('verify').innerHTML = `<div class="small" style="color:var(--bad)">${j.detail || 'verify failed'}</div>`; return; }
+    const rb = j.rulebook;
+    const rows = j.rows.map(x => `<tr><td>${x.n}</td><td>${x.tx}</td><td>${x.logged}</td><td class="rule">${x.rule}</td><td>${x.replayed}</td><td style="color:var(--${x.matches ? 'ok' : 'bad'});font-weight:700">${x.matches ? 'yes' : 'NO'}</td></tr>`).join('');
+    $('verify').innerHTML = `<div class="row"><span class="chip ${j.ok ? 'ok' : 'bad'}">${j.ok ? 'verified' : 'mismatch found'}</span><span class="small">on the ${j.ledger}</span></div>
+      <div class="small" style="margin-top:6px">1. Rulebook ${rb.name} v${rb.version}: file fingerprint <span class="rule">${(rb.fingerprint || '').slice(0, 16)}...</span>, on the ledger <span class="rule">${(rb.on_ledger || 'empty').slice(0, 16)}...</span>, match: <b>${rb.matches ? 'yes' : 'NO'}</b>${rb.problems.length ? '<br>' + rb.problems.join('<br>') : ''}</div>
+      <div class="small" style="margin-top:6px">2. Every referee decision replayed from the ledger history with the published rules:</div>
+      ${j.rows.length ? `<div style="overflow-x:auto"><table class="vt"><tr><th>#</th><th>transaction</th><th>referee said</th><th>deciding rule</th><th>replay says</th><th>matches</th></tr>${rows}</table></div>` : '<div class="small">No decisions logged yet.</div>'}`;
+  } catch (e) { $('verify').innerHTML = '<div class="small" style="color:var(--bad)">verify request failed</div>'; }
+}
+
 function renderFeed() {
-  const items = evs.filter(e => ['verdict','loan_pay','loan_set','impair','default','recovery','short','blocked','verify_lockbox','lock','withdraw','quote','error',
+  const dec = evs.filter(e => e.kind === 'verdict').slice(-30).reverse();
+  $('decisions').innerHTML = dec.length ? dec.map(e => {
+    const cs = (e.checks || []).map(c => `<span class="${c.ok ? 'ok' : 'no'}">${c.name}</span>`).join('');
+    return `<li><div class="ver"><span class="chip ${e.allowed ? 'ok' : 'bad'}">${e.allowed ? 'referee signs' : 'referee refuses'}</span><b>${e.tx}</b><span class="small">${e.amount ? amt(+e.amount) : ''}${e.to ? ' to ' + label(e.to) : ''}</span></div>
+      <div class="small">Deciding rule: <span class="rule"><b>${e.rule || '-'}</b></span>${e.allowed ? '' : ' (' + e.reason + ')'}</div>
+      <div class="small">${e.rulebook ? `${e.rulebook} v${e.rulebook_version}, fingerprint <span class="rule">${(e.rulebook_fingerprint || '').slice(0, 12)}...</span>` : ''}</div>
+      <details class="checks-d"><summary>all ${(e.checks || []).length} checks</summary><div class="checks">${cs}</div></details></li>`;
+  }).join('') : '<li class="empty">No decisions yet. Every payment from the lockbox shows up here with the rule that decided it.</li>';
+  const items = evs.filter(e => ['loan_pay','loan_set','impair','default','recovery','short','blocked','verify_lockbox','lock','withdraw','quote','error',
     'pay_payee','pay_off','release_regular_key','release_signer_list','approve_payee'].includes(e.kind)).slice(-40).reverse();
   if (!items.length) { $('feed').innerHTML = '<li class="empty">Nothing yet.</li>'; return; }
   $('feed').innerHTML = items.map(e => {
-    if (e.kind === 'verdict') {
-      const cs = (e.checks || []).map(c => `<span class="${c.ok ? 'ok' : 'no'}">${c.name}</span>`).join('');
-      return `<li><div class="ver"><span class="chip ${e.allowed ? 'ok' : 'bad'}">${e.allowed ? 'referee signs' : 'referee refuses'}</span><b>${e.tx}</b><span class="small">${e.amount ? xrp(+e.amount) + ' XRP' : ''}</span></div>${e.allowed ? '' : `<div class="small">${e.reason}</div>`}<div class="checks">${cs}</div></li>`;
-    }
     const txt = {
       loan_pay: e => `${e.late ? 'Late ' : ''}installment ${e.ok ? 'collected' : 'failed ' + e.code}: ${xrp(e.drops)} XRP`,
       loan_set: e => `Loan ${e.ok ? 'originated' : 'failed ' + e.code}: ${xrp(e.principal)} XRP`,
       impair: e => 'Loan impaired (paper loss booked in the vault)', default: e => `Loan defaulted. First-loss cover paid ${e.covered ? xrp(+e.covered) : '?'} XRP of ${e.loss ? xrp(+e.loss) : '?'}`,
-      recovery: e => `Recovery sweep to the lender: ${xrp(e.drops)} XRP`, short: e => `Lockbox short: has ${xrp(e.balance)}, needs ${xrp(e.need)} XRP`,
+      recovery: e => `Recovery sweep to the lender: ${amt(e.drops)}`, short: e => `Lockbox short: has ${xrp(e.balance)}, needs ${xrp(e.need)} XRP`,
       blocked: e => `Referee blocked ${e.tx}: ${e.reason}`, verify_lockbox: e => 'Lender verified the lock: ' + e.checks.map(c => (c.ok ? 'ok ' : 'FAIL ') + c.name).join(', '),
       lock: e => `${e.tx} ${e.ok ? 'done' : 'failed ' + e.code}`, withdraw: e => `Borrower withdrew ${xrp(e.drops)} XRP`,
       quote: e => `Quote: ${e.approved ? 'approved' : 'declined'}, tier ${e.tier}, score ${e.score}`, error: e => 'Error: ' + e.msg,
@@ -278,14 +328,20 @@ async function poll() {
   } catch (e) { $('net').textContent = 'offline'; }
 }
 
-const act = (id, fn) => $(id).addEventListener('click', async () => { $(id).disabled = true; const r = await fn(); await poll(); if (r) renderResult(r); });
+const act = (id, fn) => $(id).addEventListener('click', async () => {
+  $(id).disabled = true;  // no double clicks while the ledger works
+  const r = await fn();
+  $(id).disabled = false;  // render() then disables it again if the state says so
+  await poll(); if (r) renderResult(r);
+});
 function renderResult(r) { if (r.verdict) toast(r.verdict.allowed ? 'Allowed: ' + (r.ok ? 'sent' : 'rejected by ledger') : 'Refused: ' + r.verdict.reason); }
 act('b-lock', () => post('lock')); act('b-quote', () => post('quote')); act('b-borrow', () => post('borrow'));
 act('b-free', () => post('withdraw', {mode: 'free'})); act('b-all', () => post('withdraw', {mode: 'all'}));
 act('b-sup', () => post('pay_supplier')); act('b-own', () => post('own_wallet'));
+$('b-verify').addEventListener('click', verifyReferee);
 act('b-payoff', () => post('payoff')); act('b-release', () => post('release'));
 act('b-adv1', () => post('advance', {seconds: 120, revenue_xrp: 10})); act('b-adv2', () => post('advance', {seconds: 600, revenue_xrp: 0}));
-act('b-reset', async () => { evs = []; since = 0; $('feed').innerHTML = ''; return post('reset'); });
+act('b-reset', async () => { evs = []; since = 0; $('feed').innerHTML = ''; $('decisions').innerHTML = ''; $('verify').innerHTML = ''; return post('reset'); });
 act('b-rev', () => post('auto', {revenue: !(S.auto && S.auto.revenue)})); act('b-auto', () => post('auto', {autopilot: !(S.auto && S.auto.autopilot)}));
 poll(); setInterval(poll, 1500);
 </script>

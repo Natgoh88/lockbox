@@ -1,35 +1,36 @@
 # Lockbox
 
-Lend against the cash a business is about to earn, and let the account itself enforce the repayment.
+**A referee that makes loan agreements enforceable on XRPL.**
 
-Built for the AI & Fintech XRPL Hackathon, Lending & Borrowing track. Only work done during the event counts, so build on top of this on the day and commit as you go.
+XRPL's lending protocol leaves enforcement off the ledger. Lockbox adds a referee that must co-sign every payment from the borrower's account and follows the loan agreement as a public rulebook anyone can verify. Lending is the first rulebook.
 
-## The idea in three lines
+Built for the AI & Fintech XRPL Hackathon, Lending & Borrowing track.
 
-1. XLS-66 loans are uncollateralized and the protocol deliberately leaves underwriting and enforcement off-chain. Nothing stops a borrower from moving the money away after the loan is funded.
-2. Lockbox makes the borrower's revenue account a multisig (borrower, lender, neutral referee) with the master key switched off. The referee is required on every payment, plus one of the other two. A rulebook the referee applies decides which transactions get its signature. The borrower can spend freely, but never the next installment.
-3. The loan is sized from the account's own ledger history (what really arrived), and the lender collects, impairs, defaults and recovers with the referee, with no borrower signature needed.
+## How it works
 
-## Honest status
+1. **The referee is required on every payment.** The borrower's revenue account becomes a multi-signed account with the master key switched off: referee weight 2, borrower 1, lender 1, quorum 3. Every payment needs the referee plus the borrower or the lender. The referee alone can do nothing, and the borrower and lender together cannot move money without it.
+2. **The referee follows a public rulebook.** The rules are plain checks in code: repayment comes first, loan money can only pay suppliers the lender approved (with the invoice number on the payment), the owner can only take out what the business earned or put in, and the account freezes on ledger facts when a payment is late or revenue falls short. The rulebook's fingerprint is written in the loan broker's Data field and the agreement hash in the loan's Data field, so anyone can check the referee is using the published rules.
+3. **Anyone can verify it.** `python scripts/verify.py` checks the published rulebook file against the fingerprint on the ledger, then replays every decision the referee made from the account's ledger history. The dashboard has the same check behind "Verify the referee".
+4. **Lending is the first rulebook.** The loan is an XLS-66 loan from a closed-ended XLS-65 vault, sized from the account's own payment history (deterministic underwriting, every number explained). The lender collects, impairs, defaults and recovers through the referee, with no borrower signature needed.
+
+The demo persona is a small exporter paid by foreign buyers: buyers pay invoices into the lockbox, and the loan pays the exporter's approved suppliers.
+
+## Status
 
 | Part | Status |
 | --- | --- |
-| Underwriting math, inflow parsing, covenant rules, health math, tx builders | unit tested (63 tests) |
-| Full story on the in-memory ledger: lock, quote, LoanSet, autopay, withdraw refusals, late payment, impair, default, first-loss cover, recovery | passes (tests/test_end_to_end.py, scripts/story.py) |
-| Real backend signing: LoanSet with a single-signed first party and a multi-signed counterparty, multisigned payments | checked offline by capturing what would be submitted (tests/test_chain_offline.py) |
-| Everything that talks to Devnet (chain.py, scripts 01 to 06) | written, NOT run. The sandbox it was built in cannot reach XRPL. Expect small fixes on the first run. |
-| Closed-ended vaults (LendingProtocolV1_1) | not implemented. Open-ended vault only, which is what the xrpl.org tutorials use. |
+| Rulebook, referee, buckets, underwriting, servicer, verify | unit tested, 249 tests, no network |
+| The whole story on the simulated ledger: lock, quote, loan, supplier paid, refusals, late payment, impair, default, first-loss cover, recovery, release | passes (tests, `scripts/story.py`, `scripts/verify.py`, the dashboard) |
+| XRPL Devnet: closed-ended vault, broker with the rulebook fingerprint, weighted lock, LoanSet, LoanPays, release after repayment | ran on Devnet with test XRP. Explorer links in DEVNET.md |
 
-Things the sim does NOT reproduce: real amortization rounding (the sim uses a plain annuity, the real servicer reads `PeriodicPayment` from the ledger), real fees, and the exact late-payment rules. The late-payment path (`tfLoanLatePayment`) is the most likely to need a tweak on Devnet.
-
-On a 12 minute Devnet demo, interest is a few drops. Lender income in the demo is the per-payment `LoanServiceFee`. Say that out loud. Never present demo yields as market data.
+The dashboard runs on a simulated ledger and says so on screen; DEVNET.md has the same flow on the real XRP Ledger Devnet. On a loan that lasts minutes, interest is a few drops, so the lender's income in the demo is the per-payment service fee. A real loan runs for months. The quote "without a lockbox" is our assumption, not market data.
 
 ## Quick start
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest                              # 63 tests, no network
+pytest                              # 249 tests, no network
 
 python scripts/story.py             # the whole story in the terminal
 python scripts/offline_demo.py      # dashboard on the simulated ledger, http://localhost:8403

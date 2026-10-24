@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import os
+import json
 import random
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -38,7 +40,8 @@ def make():
     if MODE == "sim":
         from xrpl.wallet import Wallet
         from lockbox.simsetup import build
-        s = build(INTERVAL)
+        # the sim writes its rulebook file to a temp folder, so it never overwrites the published Devnet rulebook
+        s = build(INTERVAL, rulebook_path=str(Path(tempfile.mkdtemp(prefix="lockbox-sim-")) / "lending-covenant-v1.json"))
         # the exporter's supplier, approved by the lender before the loan (the list is frozen into the agreement hash)
         s.approve_payee(Wallet.create().address, cap_drops=xrp_to_drops(100), invoice_ref=SUPPLIER_INVOICE)
         return s
@@ -108,6 +111,8 @@ def state():
         out["has_offer"] = s.offer is not None
         out["has_loan"] = bool(s.servicer and s.servicer.loan_id)
         out["locked"] = bool(out["lockbox"]["master_disabled"])
+        out["payout_address"] = s.payout  # the owner's own wallet, so the referee feed can name it
+        out["lender_address"] = s.servicer.address if s.servicer else None
         return out
 
 
@@ -195,7 +200,7 @@ def own_wallet():
 
 
 @app.post("/api/pay_supplier")
-def pay_supplier(b: Body):
+def pay_supplier(b: Body | None = None):
     """Pay the first approved supplier with its invoice memo: by default everything the loan and free cash allow."""
     def go():
         s = sc()
@@ -205,7 +210,7 @@ def pay_supplier(b: Body):
         addr, p = next(iter(st["approved_payees"].items()))
         bk = st["buckets"] or {}
         left = p["cap_drops"] - (bk.get("paid_to_payees") or {}).get(addr, 0)
-        amt = xrp_to_drops(b.xrp) if b.xrp is not None else min(left, bk.get("unspent_principal", 0) + bk.get("earned_free_cash", 0))
+        amt = xrp_to_drops(b.xrp) if b and b.xrp is not None else min(left, bk.get("unspent_principal", 0) + bk.get("earned_free_cash", 0))
         v, r = s.agent.pay_payee(addr, max(1, amt), p["invoice_ref"])
         return {"amount": amt, "to": addr, "verdict": v.to_dict(), "ok": bool(r and r.ok)}
     return guarded(go)
@@ -224,6 +229,44 @@ def release():
     def go():
         v, r = sc().release()
         return {"verdict": v.to_dict(), "ok": bool(r and r.ok), "code": r.code if r else None}
+    return guarded(go)
+
+
+@app.get("/api/verify")
+def verify_referee():
+    """Anyone can check the referee: the published rulebook against the fingerprint on the ledger, then every
+    logged decision replayed from the ledger history. Uses lockbox.verify, the same code as scripts/verify.py."""
+    from lockbox import verify as V
+    from lockbox.buckets import _meta, _tx
+
+    def go():
+        s = sc()
+        doc = json.loads(Path(s.state()["rulebook"]["file"]).read_text())
+        if MODE == "sim":
+            logged = events.recent(10_000)
+        else:
+            f = Path(os.environ.get("LOCKBOX_EVENTS", str(HERE / "data" / "events.jsonl")))
+            logged = [json.loads(x) for x in f.read_text().splitlines() if x.strip()] if f.exists() else []
+        decisions = [e for e in logged if e.get("kind") == "verdict" and "decision" in e]
+        broker_data = s.b.broker_view(s.broker_id).data if s.broker_id else None
+        history = s.b.account_tx(s.lockbox)
+        loanset = next((_tx(e) for e in history if _tx(e).get("TransactionType") == "LoanSet"
+                        and _meta(e).get("TransactionResult") == "tesSUCCESS"), None)
+        problems = V.rulebook_problems(doc, broker_data, loanset.get("Data") if loanset else None)
+        rows = V.replay(decisions, history, s.b.balance(s.lockbox), s.lockbox, doc, lambda b: s.b.broker_view(b).data)
+        names = {s.payout: "owner's wallet", s.lockbox: "lockbox", **{a: "approved supplier" for a in s.params.approved_payees}}
+        if s.servicer:
+            names[s.servicer.address] = "lender"
+        for r, ev in zip(rows, decisions):  # same labels as scripts/verify.py
+            dest = ev["decision"]["tx"].get("Destination")
+            if dest in names:
+                r.tx = r.tx.split(" to ")[0] + f" to {names[dest]}"
+        return {"ledger": "simulated ledger" if MODE == "sim" else "XRPL Devnet",
+                "rulebook": {"name": doc.get("name"), "version": doc.get("version"), "fingerprint": doc.get("fingerprint"),
+                             "on_ledger": broker_data, "matches": not problems, "problems": problems},
+                "rows": [{"n": r.n, "tx": r.tx, "logged": r.logged, "rule": r.rule, "replayed": r.replayed,
+                          "replayed_rule": r.replayed_rule, "matches": r.matches, "problems": r.problems} for r in rows],
+                "ok": not problems and all(r.matches for r in rows)}
     return guarded(go)
 
 
