@@ -15,6 +15,7 @@ from xrpl.models.transactions import (
     LoanSet,
     Memo,
     Payment,
+    SetRegularKey,
     SignerListSet,
     VaultCreate,
     VaultDeposit,
@@ -53,8 +54,9 @@ def vault_deposit(account: str, vault_id: str, drops: int) -> VaultDeposit:
 
 
 def broker_set(owner: str, vault_id: str, debt_maximum: int, cover_rate_minimum: int, cover_rate_liquidation: int,
-               management_fee_rate: int = 0) -> LoanBrokerSet:
-    return LoanBrokerSet(
+               management_fee_rate: int = 0, data: str | None = None) -> LoanBrokerSet:
+    """data: the rulebook hash (hex). Field size on Devnet still to check; 32 bytes here."""
+    kw: dict = dict(
         account=owner,
         vault_id=vault_id,
         debt_maximum=str(debt_maximum),
@@ -62,6 +64,9 @@ def broker_set(owner: str, vault_id: str, debt_maximum: int, cover_rate_minimum:
         cover_rate_liquidation=cover_rate_liquidation,
         management_fee_rate=management_fee_rate,
     )
+    if data:
+        kw["data"] = data
+    return LoanBrokerSet(**kw)
 
 
 def cover_deposit(owner: str, broker_id: str, drops: int) -> LoanBrokerCoverDeposit:
@@ -70,9 +75,9 @@ def cover_deposit(owner: str, broker_id: str, drops: int) -> LoanBrokerCoverDepo
 
 # ---- the loan ----
 
-def loan_set(lender: str, lockbox: str, broker_id: str, offer: Offer) -> LoanSet:
+def loan_set(lender: str, lockbox: str, broker_id: str, offer: Offer, data: str | None = None) -> LoanSet:
     """Build the LoanSet from an approved offer. Account = lender (single signature), Counterparty = lockbox
-    (multi-signed by two of its three signers inside CounterpartySignature)."""
+    (multi-signed by borrower + referee inside CounterpartySignature). data: the agreement hash (hex)."""
     if not offer.approved:
         raise ValueError("cannot build a loan from a declined offer")
     kw = dict(
@@ -89,6 +94,8 @@ def loan_set(lender: str, lockbox: str, broker_id: str, offer: Offer) -> LoanSet
         kw["loan_origination_fee"] = str(offer.origination_fee_drops)
     if offer.service_fee_drops:
         kw["loan_service_fee"] = str(offer.service_fee_drops)
+    if data:
+        kw["data"] = data
     return LoanSet(**kw)
 
 
@@ -126,6 +133,16 @@ def lockdown_signer_list(lockbox: str, borrower_signer: str, lender_signer: str,
         signer_quorum=LOCKBOX_QUORUM,
         signer_entries=[SignerEntry(account=a, signer_weight=w) for a, w in weights.items()],
     )
+
+
+def set_regular_key(lockbox: str, key: str) -> SetRegularKey:
+    """Release, step 1 (multi-signed, referee + borrower): hand the account to the borrower's registered key."""
+    return SetRegularKey(account=lockbox, regular_key=key)
+
+
+def remove_signer_list(lockbox: str) -> SignerListSet:
+    """Release, step 2 (signed with the new regular key). XRPL refuses this while it is the account's last way to sign."""
+    return SignerListSet(account=lockbox, signer_quorum=0)
 
 
 def lockdown_disable_master(lockbox: str) -> AccountSet:

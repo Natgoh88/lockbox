@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from . import buckets, covenant, events, health, protocol as P
 from .backend import Backend, Result, addr_of
 from .buckets import Payee
-from .covenant import AcceptedTerms, ApprovalState, CovenantContext, LoanView, Verdict
+from .covenant import AcceptedTerms, Acceptance, ApprovalState, CovenantContext, LoanView, Verdict
 from .underwrite import Offer
 
 
@@ -35,16 +35,27 @@ class Params:
     holdback_bps: int = 0  # holdback: share of each revenue payment kept back while a loan is open (basis points)
     freeze_after_short_intervals: int = 2
     pay_lead_fraction: float = 0.25  # collect when this close to the due date (fraction of the interval)
+    release_key: str = ""  # the borrower's registered key; the account goes back to it after full repayment
+
+    def rulebook(self) -> dict:
+        """The numbers the referee enforces. Their hash goes in the LoanBroker Data field."""
+        return {"max_fee_drops": self.max_fee_drops, "fee_buffer_drops": self.fee_buffer_drops, "pay_allowance_drops": self.pay_allowance_drops,
+                "reserve_installments": self.reserve_installments, "holdback_bps": self.holdback_bps,
+                "freeze_after_short_intervals": self.freeze_after_short_intervals, "approval_window": covenant.APPROVAL_WINDOW,
+                "signer_weights": {"referee": P.REFEREE_WEIGHT, "borrower": P.PARTY_WEIGHT, "lender": P.PARTY_WEIGHT},
+                "quorum": P.LOCKBOX_QUORUM}
 
 
 class PolicyService:
-    def __init__(self, backend: Backend, key, lockbox: str, lender: str, params: Params):
+    def __init__(self, backend: Backend, key, lockbox: str, lender: str, params: Params, borrower: str = ""):
         self.b = backend
         self.key = key
         self.lockbox = lockbox
         self.lender = lender
+        self.borrower = borrower
         self.params = params
         self.accepted: AcceptedTerms | None = None
+        self.acceptance: Acceptance | None = None
         self.loan_id: str | None = None
         self._last_owed = 0
         self.owed_at_default: int | None = None
@@ -56,10 +67,12 @@ class PolicyService:
     def address(self) -> str:
         return addr_of(self.key)
 
-    def accept(self, terms: AcceptedTerms) -> None:
-        """The borrower accepted these exact terms. In production this call carries the borrower's signature."""
+    def accept(self, terms: AcceptedTerms, acceptance: Acceptance | None = None) -> None:
+        """The borrower accepted these exact terms. The signature is checked when the LoanSet comes in."""
         self.accepted = terms
-        events.emit("policy", ts=self.b.now(), msg="borrower accepted terms", principal=terms.principal)
+        self.acceptance = acceptance
+        events.emit("policy", ts=self.b.now(), msg="borrower accepted terms", principal=terms.principal,
+                    agreement_hash=acceptance.agreement_hash if acceptance else None)
 
     def set_loan(self, loan_id: str) -> None:
         self.loan_id = loan_id
@@ -111,6 +124,7 @@ class PolicyService:
             approved_payees=dict(p.approved_payees), buckets=bk, holdback_bps=p.holdback_bps,
             freeze_after_short_intervals=p.freeze_after_short_intervals,
             approval=self.approval_state(tx.get("Account", self.lockbox)) if tx is not None else None,
+            borrower=self.borrower, acceptance=self.acceptance, release_key=p.release_key,
         )
 
     def review(self, tx: dict) -> Verdict:
@@ -160,12 +174,33 @@ class BorrowerAgent:
         return out
 
     def accept_offer(self, offer: Offer, broker_id: str) -> AcceptedTerms:
+        """Sign the hash of the exact terms plus the approved payees, and hand both to the referee."""
         self.offer = offer
         terms = AcceptedTerms(broker_id=broker_id, principal=offer.principal_drops, interest_rate_units=offer.interest_rate_units,
                               payment_total=offer.payment_total, payment_interval=offer.payment_interval, grace_period=offer.grace_period,
                               origination_fee=offer.origination_fee_drops, service_fee=offer.service_fee_drops)
-        self.policy.accept(terms)
+        acc = covenant.sign_acceptance(self.key, terms, self.policy.params.approved_payees) if hasattr(self.key, "private_key") else None
+        self.policy.accept(terms, acc)
         return terms
+
+    def post_bond(self, drops: int) -> Result:
+        """Send the business's own XRP into the lockbox as a bond. Locked until the loan is settled, swept first on default."""
+        tx = self.b.prepare(P.as_dict(P.payment(self.address, self.lockbox, drops, memos=[P.memo(buckets.BOND_MEMO)])))
+        r = self.b.submit(tx, [self.key])
+        events.emit("bond", ts=self.b.now(), ok=r.ok, code=r.code, drops=drops)
+        return r
+
+    def release(self) -> tuple[Verdict, Result | None]:
+        """After full repayment: referee + borrower set the borrower's registered key as the regular key, then the
+        borrower removes the signer list with it. The order matters: XRPL will not remove the last way to sign.
+        NEEDS A DEVNET CHECK: chain.submit must single-sign with a regular key (signer address != account)."""
+        key = self.policy.params.release_key or self.address
+        v, r = self._send_with_referee(P.set_regular_key(self.lockbox, key), "release_regular_key", key=key)
+        if r is None or not r.ok:
+            return v, r
+        r2 = self.b.submit(self.b.prepare(P.as_dict(P.remove_signer_list(self.lockbox))), [self.key])
+        events.emit("release_signer_list", ts=self.b.now(), ok=r2.ok, code=r2.code)
+        return v, r2
 
     def cosign_loan(self, tx: dict):
         """The borrower checks the LoanSet against what it accepted before it signs."""
@@ -243,7 +278,9 @@ class Servicer:
         failed = [n for n, ok in self.verify_lockbox() if not ok]
         if failed:
             raise RuntimeError("lockbox is not locked down: " + ", ".join(failed))
-        tx = self.b.prepare(P.as_dict(P.loan_set(self.address, self.lockbox, self.broker_id, offer)), signers_count=2)
+        a = self.policy.accepted
+        data = covenant.agreement_hash(a, self.policy.params.approved_payees) if a else None
+        tx = self.b.prepare(P.as_dict(P.loan_set(self.address, self.lockbox, self.broker_id, offer, data=data)), signers_count=2)
         policy_key = self.policy.cosign(tx)
         borrower_key = borrower.cosign_loan(tx)
         r = self.b.submit(tx, [self.key], counterparty_signers=[borrower_key, policy_key])

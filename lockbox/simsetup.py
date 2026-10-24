@@ -13,9 +13,11 @@ def build(interval: int = 120, seed_revenue: bool = True) -> Scenario:
     chain = SimChain()
     names = ["lender", "borrower", "policy", "lockbox", "payout", "cust1", "cust2", "cust3"]
     addr = {n: Wallet.create().address for n in names}
+    borrower = Wallet.create()  # a real key pair: the borrower signs the agreement hash
+    addr["borrower"] = borrower.address
     for n, xrp in {"lender": 500, "borrower": 5, "policy": 5, "lockbox": 10, "payout": 2, "cust1": 1000, "cust2": 1000, "cust3": 1000}.items():
         chain.fund(addr[n], xrp_to_drops(xrp))
-    sc = Scenario(b=chain, lender=addr["lender"], borrower=addr["borrower"], policy_key=addr["policy"], lockbox_key=addr["lockbox"],
+    sc = Scenario(b=chain, lender=addr["lender"], borrower=borrower, policy_key=addr["policy"], lockbox_key=addr["lockbox"],
                   payout=addr["payout"], customers=[addr["cust1"], addr["cust2"], addr["cust3"]], uw=demo_policy(interval))
     sc.setup_lender(deposit_drops=xrp_to_drops(300), cover_drops=xrp_to_drops(40))
     if seed_revenue:

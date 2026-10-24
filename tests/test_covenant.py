@@ -1,4 +1,8 @@
-from lockbox.covenant import AcceptedTerms, CovenantContext, LoanView, evaluate, free_cash
+from xrpl.wallet import Wallet
+
+from lockbox.covenant import AcceptedTerms, CovenantContext, LoanView, evaluate, free_cash, sign_acceptance
+
+BORROWER = Wallet.create()
 
 LB, LENDER, PAYOUT, BROKER = "rLockbox", "rLender", "rPayout", "B" * 64
 LID = "L" * 64
@@ -81,9 +85,12 @@ def test_no_loan_means_only_reserve_and_buffer_held_back():
 
 
 def test_everything_else_refused():
-    for t in ("SignerListSet", "AccountSet", "SetRegularKey", "AccountDelete", "OfferCreate", "TrustSet", "DelegateSet"):
+    for t in ("SignerListSet", "AccountSet", "AccountDelete", "OfferCreate", "TrustSet", "DelegateSet"):
         v = evaluate({"TransactionType": t, "Account": LB, "Fee": "30"}, ctx())
         assert not v.allowed and "type" in failed(v), t
+    # M2: SetRegularKey is the release path now, still refused while the loan is open
+    v = evaluate({"TransactionType": "SetRegularKey", "Account": LB, "RegularKey": "rBorrower", "Fee": "30"}, ctx())
+    assert not v.allowed and "loan_repaid" in failed(v)
 
 
 def test_cross_currency_tricks_refused():
@@ -112,8 +119,10 @@ def loanset(**kw):
 
 
 def test_loanset_needs_accepted_matching_terms():
-    c = ctx(loan=None, accepted=terms())
-    assert evaluate(loanset(), c).allowed
+    # M2: the borrower signs the agreement hash and the LoanSet carries it in Data, otherwise the referee refuses
+    acc = sign_acceptance(BORROWER, terms(), {})
+    c = ctx(loan=None, accepted=terms(), borrower=BORROWER.address, acceptance=acc)
+    assert evaluate(loanset(Data=acc.agreement_hash), c).allowed
     assert "borrower_accepted_terms" in failed(evaluate(loanset(), ctx(loan=None)))
     assert "same_principal" in failed(evaluate(loanset(PrincipalRequested="20000000"), c))
     assert "rate_not_higher" in failed(evaluate(loanset(InterestRate=9000), c))

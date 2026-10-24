@@ -30,6 +30,7 @@ class Account:
     quorum: int = 0
     master_disabled: bool = False
     sequence: int = 1
+    regular_key: str = ""
 
 
 @dataclass
@@ -93,7 +94,7 @@ class SimChain:
 
     def lockbox_state(self, addr: str) -> dict:
         a = self.accounts.get(addr, Account())
-        return {"master_disabled": a.master_disabled, "signers": dict(a.signers), "quorum": a.quorum, "regular_key": False}
+        return {"master_disabled": a.master_disabled, "signers": dict(a.signers), "quorum": a.quorum, "regular_key": a.regular_key or None}
 
     def prepare(self, tx: dict, signers_count: int = 0) -> dict:
         out = dict(tx)
@@ -130,6 +131,8 @@ class SimChain:
         if a is None:
             return "terNO_ACCOUNT"
         if account in signers and not a.master_disabled:
+            return None
+        if a.regular_key and signers == {a.regular_key}:
             return None
         if a.signers:
             weight = sum(w for s, w in a.signers.items() if s in signers)
@@ -216,6 +219,11 @@ class SimChain:
     def _do_SignerListSet(self, tx: dict) -> Result:
         self._charge_fee(tx)
         a = self.accounts[tx["Account"]]
+        if int(tx["SignerQuorum"]) == 0:  # delete the list, but never the last way to sign
+            if a.master_disabled and not a.regular_key:
+                return self._log(tx, "tecNO_ALTERNATIVE_KEY")
+            a.quorum, a.signers = 0, {}
+            return self._log(tx, "tesSUCCESS")
         a.quorum = int(tx["SignerQuorum"])
         a.signers = {e["SignerEntry"]["Account"]: int(e["SignerEntry"]["SignerWeight"]) for e in tx["SignerEntries"]}
         return self._log(tx, "tesSUCCESS")
@@ -224,9 +232,18 @@ class SimChain:
         self._charge_fee(tx)
         if tx.get("SetFlag") == ASF_DISABLE_MASTER:
             a = self.accounts[tx["Account"]]
-            if not a.signers:
+            if not a.signers and not a.regular_key:
                 return self._log(tx, "tecNO_ALTERNATIVE_KEY")
             a.master_disabled = True
+        return self._log(tx, "tesSUCCESS")
+
+    def _do_SetRegularKey(self, tx: dict) -> Result:
+        self._charge_fee(tx)
+        a = self.accounts[tx["Account"]]
+        key = tx.get("RegularKey", "")
+        if not key and a.master_disabled and not a.signers:
+            return self._log(tx, "tecNO_ALTERNATIVE_KEY")
+        a.regular_key = key
         return self._log(tx, "tesSUCCESS")
 
     def _do_VaultCreate(self, tx: dict) -> Result:

@@ -10,12 +10,15 @@ Quorum is 3, so every payment needs the referee plus one other. The borrower and
 together cannot move money, and the referee alone can do nothing.
 The referee's rules are below. They are plain checks, no model, and they fail closed.
 
-  LoanSet   (lockbox is the Counterparty) only if the borrower accepted these exact terms
+  LoanSet   (lockbox is the Counterparty) only if the borrower signed the hash of these exact terms
+            plus the approved payees, and that same hash is in the LoanSet Data field
   LoanPay   the right loan, the right amount, no special flags. Lender + referee can autopay.
   Payment   to an approved payee (supplier): only with its invoice memo, within its cap, out of
             unspent principal (and earned free cash)
             to the borrower's own wallet: only out of earned free cash
             to the lender: only after default, only up to what was owed (recovery)
+  SetRegularKey  release: only to the borrower's registered key, only once the loan is fully repaid
+                 and nothing is owed. The borrower then removes the signer list with that key.
 
 Borrower payments freeze on ledger facts only: an installment is past due, or revenue fell short of
 the installment for two whole intervals in a row. The lender's impaired flag does NOT freeze anything,
@@ -33,7 +36,11 @@ rebuilt from the ledger history by buckets.py.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+
+from xrpl.core import keypairs
 
 from . import buckets as bk
 from .buckets import Buckets, Payee, memo_texts
@@ -44,6 +51,8 @@ TF_PARTIAL_PAYMENT = 0x00020000
 FORBIDDEN_FIELDS = ("Paths", "SendMax", "DeliverMin", "DeliverMax", "Sponsor", "Delegate", "RegularKey")
 LOANSET_BANNED_FEES = ("LatePaymentFee", "ClosePaymentFee", "OverpaymentFee")
 APPROVAL_WINDOW = 10  # ledgers, roughly 40 seconds
+RULEBOOK_VERSION = "lockbox-rulebook-2"
+ALLOWED_TYPES = ("LoanSet", "LoanPay", "Payment", "SetRegularKey")
 
 
 @dataclass
@@ -81,6 +90,50 @@ class AcceptedTerms:
     service_fee: int = 0
 
 
+@dataclass(frozen=True)
+class Acceptance:
+    """The borrower's signature over the agreement hash (terms plus approved payees)."""
+    agreement_hash: str
+    public_key: str
+    signature: str
+
+
+def _sha256_json(obj) -> str:
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()).hexdigest().upper()
+
+
+def rulebook_hash(config: dict) -> str:
+    """sha256 of the rulebook settings. Goes in the LoanBroker Data field, so anyone can check which rules apply."""
+    return _sha256_json({"version": RULEBOOK_VERSION, **config})
+
+
+def agreement_hash(terms: AcceptedTerms, payees: dict[str, Payee]) -> str:
+    """sha256 of the exact terms plus the approved payees. The borrower signs it; it goes in the LoanSet Data field."""
+    return _sha256_json({"terms": asdict(terms),
+                         "approved_payees": {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in payees.items()}})
+
+
+def sign_acceptance(wallet, terms: AcceptedTerms, payees: dict[str, Payee]) -> Acceptance:
+    h = agreement_hash(terms, payees)
+    return Acceptance(agreement_hash=h, public_key=wallet.public_key, signature=keypairs.sign(bytes.fromhex(h), wallet.private_key))
+
+
+def acceptance_problem(acc: Acceptance | None, expected_hash: str, borrower: str) -> str | None:
+    """None if the borrower really signed exactly this agreement, otherwise what is wrong."""
+    if acc is None:
+        return "the borrower has not signed the terms"
+    if acc.agreement_hash != expected_hash:
+        return "the borrower signed different terms or payees"
+    try:
+        if keypairs.derive_classic_address(acc.public_key) != borrower:
+            return "the signing key is not the borrower's"
+        if not keypairs.is_valid_message(bytes.fromhex(acc.agreement_hash), bytes.fromhex(acc.signature), acc.public_key):
+            return "the signature does not verify"
+    except Exception as e:  # malformed key or signature: fail closed
+        return f"the signature cannot be checked ({type(e).__name__})"
+    return None
+
+
 @dataclass
 class ApprovalState:
     """What the referee knows about the ledger clock and its own outstanding signature."""
@@ -110,6 +163,9 @@ class CovenantContext:
     approved_payees: dict[str, Payee] = field(default_factory=dict)
     buckets: Buckets | None = None  # rebuilt from history by the caller; without it every drop counts as earned
     approval: ApprovalState | None = None  # the referee always sets this; pure rule checks may leave it out
+    borrower: str = ""  # the borrower's signing address: acceptances must come from it
+    acceptance: Acceptance | None = None
+    release_key: str = ""  # the borrower's registered key the account is handed back to after repayment
 
 
 @dataclass
@@ -238,7 +294,7 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
     fc = free_cash(ctx)
     loan = ctx.loan
 
-    add("type", ttype in ("LoanSet", "LoanPay", "Payment"), f"{ttype} is not allowed")
+    add("type", ttype in ALLOWED_TYPES, f"{ttype} is not allowed")
     if ttype == "LoanSet":
         add("parties", tx.get("Account") == ctx.lender and tx.get("Counterparty") == ctx.lockbox,
             "LoanSet must be Account=lender, Counterparty=lockbox")
@@ -246,7 +302,7 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
         add("account", tx.get("Account") == ctx.lockbox, f"must be {ctx.lockbox}")
     fee = tx.get("Fee", "0")
     add("fee_cap", _is_drops(fee) and int(fee) <= ctx.max_fee_drops, f"fee {fee}, cap {ctx.max_fee_drops}")
-    present = [f for f in FORBIDDEN_FIELDS if f in tx]
+    present = [f for f in FORBIDDEN_FIELDS if f in tx and not (f == "RegularKey" and ttype == "SetRegularKey")]
     add("no_forbidden_fields", not present, ", ".join(present))
     if ctx.approval is not None:
         _approval_checks(add, tx, ctx.approval)
@@ -263,6 +319,17 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
                 and _int(tx, "GracePeriod") == a.grace_period, "payment schedule differs")
             add("fees_not_higher", 0 <= _int(tx, "LoanOriginationFee") <= a.origination_fee and 0 <= _int(tx, "LoanServiceFee") <= a.service_fee
                 and not any(f in tx for f in LOANSET_BANNED_FEES), "extra or higher fees")
+            expected = agreement_hash(a, ctx.approved_payees)
+            problem = acceptance_problem(ctx.acceptance, expected, ctx.borrower)
+            add("borrower_signed_terms", problem is None, problem or "")
+            add("agreement_hash_in_data", str(tx.get("Data", "")).upper() == expected, f"Data must be the agreement hash {expected}")
+
+    elif ttype == "SetRegularKey":
+        add("release_to_registered_key", bool(ctx.release_key) and tx.get("RegularKey") == ctx.release_key,
+            f"RegularKey {tx.get('RegularKey')}, registered key {ctx.release_key or 'none'}")
+        add("loan_repaid", loan is None or (loan.payment_remaining <= 0 and not loan.defaulted),
+            "the account is released only after the loan is fully repaid")
+        add("nothing_owed", ctx.recovery_remaining <= 0 and (loan is None or loan.total_owed <= 0), "something is still owed")
 
     elif ttype == "LoanPay":
         add("loan_known", loan is not None and tx.get("LoanID") == loan.loan_id, "LoanID does not match the lockbox loan")

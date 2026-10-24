@@ -40,12 +40,14 @@ class Scenario:
 
     vault_id: str = ""
     broker_id: str = ""
+    rulebook_hash: str = ""
     offer: Offer | None = None
 
     def __post_init__(self):
         self.lockbox = addr_of(self.lockbox_key)
         self.params.allowlist = set(self.params.allowlist) | {self.payout}
-        self.policy = PolicyService(self.b, self.policy_key, self.lockbox, addr_of(self.lender), self.params)
+        self.params.release_key = self.params.release_key or addr_of(self.borrower)
+        self.policy = PolicyService(self.b, self.policy_key, self.lockbox, addr_of(self.lender), self.params, borrower=addr_of(self.borrower))
         self.agent = BorrowerAgent(self.b, self.borrower, self.lockbox_key, self.payout, self.policy)
         self.servicer: Servicer | None = None
 
@@ -69,7 +71,9 @@ class Scenario:
         v = self._send(P.vault_create(la), self.lender, "VaultCreate")
         self.vault_id = v.created["Vault"]
         self._send(P.vault_deposit(la, self.vault_id, deposit_drops), self.lender, "VaultDeposit")
-        br = self._send(P.broker_set(la, self.vault_id, debt_max, int(cover_min_pct * RATE_UNITS / 100), RATE_UNITS), self.lender, "LoanBrokerSet")
+        self.rulebook_hash = covenant.rulebook_hash(self.params.rulebook())
+        br = self._send(P.broker_set(la, self.vault_id, debt_max, int(cover_min_pct * RATE_UNITS / 100), RATE_UNITS, data=self.rulebook_hash),
+                        self.lender, "LoanBrokerSet")
         self.broker_id = br.created["LoanBroker"]
         self._send(P.cover_deposit(la, self.broker_id, cover_drops), self.lender, "LoanBrokerCoverDeposit")
         self.servicer = Servicer(self.b, self.lender, self.policy, self.lockbox, addr_of(self.borrower), addr_of(self.policy_key),
@@ -102,9 +106,17 @@ class Scenario:
         assert self.servicer is not None
         self.servicer.approve_payee(address, cap_drops, invoice_ref)
 
+    def post_bond(self, drops: int) -> Result:
+        return self.agent.post_bond(drops)
+
+    def release(self):
+        return self.agent.release()
+
     # ---- underwriting ----
     def quote(self, requested: int | None = None) -> Offer:
-        flows = parse_account_tx(self.b.account_tx(self.lockbox), self.lockbox, ignore_senders={addr_of(self.lender)})
+        # the business's own wallets (bond, top-ups) are not revenue
+        own = {addr_of(self.lender), addr_of(self.borrower), self.payout}
+        flows = parse_account_tx(self.b.account_tx(self.lockbox), self.lockbox, ignore_senders=own)
         self.offer = underwrite(flows, self.b.now(), self.uw, requested)
         events.emit("quote", ts=self.b.now(), approved=self.offer.approved, tier=self.offer.tier, score=self.offer.score,
                     principal=self.offer.principal_drops, installment=self.offer.installment_drops, reasons=self.offer.reasons,
@@ -159,5 +171,7 @@ class Scenario:
             "frozen": covenant.frozen_reasons(ctx),
             "ledger_index": self.policy.ledger_clock(),
             "approval": self.policy.approval_state(self.lockbox).outstanding,
+            "rulebook_hash": self.rulebook_hash,
+            "agreement_hash": self.policy.acceptance.agreement_hash if self.policy.acceptance else None,
             "approved_payees": {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in self.params.approved_payees.items()},
         }
