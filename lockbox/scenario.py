@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from . import covenant, events, health, protocol as P
 from .backend import Backend, Result, addr_of
 from .covenant import free_cash
-from .inflows import parse_account_tx
+from .inflows import funded_by, parse_account_tx
 from .roles import BorrowerAgent, Params, PolicyService, Servicer
 from .underwrite import Offer, Policy, underwrite
 from .units import RATE_UNITS
@@ -128,7 +128,10 @@ class Scenario:
         # the business's own wallets (bond, top-ups) are not revenue
         own = {addr_of(self.lender), addr_of(self.borrower), self.payout}
         flows = parse_account_tx(self.b.account_tx(self.lockbox), self.lockbox, ignore_senders=own)
-        self.offer = underwrite(flows, self.b.now(), self.uw, requested)
+        # a "customer" the borrower, lockbox or payout wallet ever paid is the borrower's own money coming back
+        wallets = {addr_of(self.borrower), self.lockbox, self.payout}
+        sock = {s for s in {f.sender for f in flows} if funded_by(self.b.account_tx(s), s, wallets)}
+        self.offer = underwrite(flows, self.b.now(), self.uw, requested, own_funded=sock)
         events.emit("quote", ts=self.b.now(), approved=self.offer.approved, tier=self.offer.tier, score=self.offer.score,
                     principal=self.offer.principal_drops, installment=self.offer.installment_drops, reasons=self.offer.reasons,
                     declines=self.offer.declines)

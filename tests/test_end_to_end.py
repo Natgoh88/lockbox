@@ -62,8 +62,8 @@ def test_withdraw_everything_refused_withdraw_free_cash_allowed(loaned):
     s = loaned.state()["lockbox"]
     v, r = loaned.agent.withdraw(s["balance"] - 2_000_000)
     assert not v.allowed and r is None and "within_free_cash" in v.reason
-    # M2: right after funding the money is loan principal, not earned cash, so nothing is free yet
-    assert s["free_cash"] == 0
+    # M2: right after funding the money is loan principal, not earned cash: free cash only ever comes from the own float
+    assert s["free_cash"] < s["balance"] - loaned.offer.principal_drops
     loaned.earn(xrp_to_drops(5))  # a buyer pays an invoice
     s = loaned.state()["lockbox"]
     assert s["free_cash"] > 0

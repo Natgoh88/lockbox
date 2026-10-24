@@ -40,6 +40,19 @@ def created_account(meta: dict, account: str) -> bool:
     return False
 
 
+def funded_by(entries: list[dict], account: str, own: set[str]) -> bool:
+    """True if any of the `own` wallets ever paid XRP into `account` (created it or topped it up), read from the
+    account's own account_tx. Revenue from such a sender is the borrower's money going round in a circle."""
+    for e in entries:
+        tx = e.get("tx_json") or e.get("tx") or {}
+        meta = e.get("meta") or e.get("metaData") or {}
+        if not e.get("validated", True) or meta.get("TransactionResult") != "tesSUCCESS":
+            continue
+        if tx.get("TransactionType") == "Payment" and tx.get("Destination") == account and tx.get("Account") in own:
+            return True
+    return False
+
+
 def parse_account_tx(entries: list[dict], account: str, ignore_senders: set[str] | None = None) -> list[Inflow]:
     """entries = result["transactions"] from an account_tx call (API v1 or v2 shape)."""
     ignore = ignore_senders or set()

@@ -37,10 +37,11 @@ def _failed(verdict):
 def test_payee_refund_laundering(funded):
     # pay a friendly supplier out of principal, have it sent straight back, then pull it to the own wallet
     sup = funded.customers[2]
+    free0 = funded.state()["buckets"]["earned_free_cash"]
     v, r = funded.agent.pay_payee(sup, xrp_to_drops(30), INVOICE)
     assert v.allowed and r.ok
     funded._send(P.payment(sup, funded.lockbox, xrp_to_drops(30)), sup, "supplier refund")
-    assert funded.state()["buckets"]["earned_free_cash"] == 0  # the refund went back to unspent principal
+    assert funded.state()["buckets"]["earned_free_cash"] <= free0  # the refund went back to unspent principal
     payout0 = funded.b.balance(funded.payout)
     v, r = funded.agent.withdraw(xrp_to_drops(30))
     assert not v.allowed and r is None

@@ -212,22 +212,26 @@ def funded(sc):
 
 def test_sim_principal_is_not_free_cash_after_funding(funded):
     bk = funded.state()["buckets"]
-    # the 12 XRP float does not quite cover reserve + fee buffer + installment, so principal tops up the installment reserve
-    assert bk["earned_free_cash"] == 0
-    assert funded.offer.principal_drops - bk["installment_reserve"] < bk["unspent_principal"] < funded.offer.principal_drops
+    # free cash can only come from the business's own float (12 XRP before the loan), never from the principal
+    float_left = funded.state()["lockbox"]["balance"] - funded.offer.principal_drops
+    assert bk["earned_free_cash"] < float_left
+    assert funded.offer.principal_drops - bk["installment_reserve"] <= bk["unspent_principal"] <= funded.offer.principal_drops
     v, r = funded.agent.withdraw(xrp_to_drops(20))
     assert not v.allowed and r is None
 
 
 def test_sim_pay_supplier_then_refund_then_withdraw(funded):
     sup = funded.customers[2]
-    p0 = funded.state()["buckets"]["unspent_principal"]
+    b0 = funded.state()["buckets"]
+    p0, free0 = b0["unspent_principal"], b0["earned_free_cash"]
     v, r = funded.agent.pay_payee(sup, xrp_to_drops(30), "PO-1001")
     assert v.allowed and r.ok
-    assert funded.state()["buckets"]["unspent_principal"] == p0 - xrp_to_drops(30) - int(r.tx["Fee"])  # fee comes off too: no earned cash left
+    fee = int(r.tx["Fee"])  # paid from earned cash if there is any, else from principal
+    assert p0 - xrp_to_drops(30) - fee <= funded.state()["buckets"]["unspent_principal"] <= p0 - xrp_to_drops(30)
     funded._send(P.payment(sup, funded.lockbox, xrp_to_drops(30)), sup, "supplier refund")
-    assert funded.state()["buckets"]["unspent_principal"] == p0 - int(r.tx["Fee"])
-    assert funded.state()["buckets"]["earned_free_cash"] == 0
+    after = funded.state()["buckets"]
+    assert p0 - fee <= after["unspent_principal"] <= p0  # the refund went back to principal
+    assert after["earned_free_cash"] <= free0  # and not one drop of it became free cash
     v, r = funded.agent.withdraw(xrp_to_drops(30))
     assert not v.allowed and "within_free_cash" in v.reason
 

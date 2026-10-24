@@ -8,11 +8,16 @@ conservative expected inflow per payment interval (a debt service coverage ratio
   max principal                    = annuity present value of that installment
 
 The score only decides the tier (rate premium) and whether to decline. It never raises the limit.
+
+Before measuring, senders are cleaned (clean_inflows):
+  a sender first seen fewer than min_sender_age_intervals ago is ignored (too new to trust)
+  a sender the borrower's own wallets ever paid (own_funded, found by inflows.funded_by) is ignored
+  no single sender counts for more than max_sender_share of the cleaned revenue
 """
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .inflows import Inflow
 from .units import fmt_xrp, period_rate, pct_to_units
@@ -34,6 +39,8 @@ class Policy:
     max_principal_drops: int = 500_000_000
     origination_fee_drops: int = 0
     service_fee_drops: int = 0
+    min_sender_age_intervals: int = 2  # senders first seen more recently than this are not counted
+    max_sender_share: float = 0.4  # one sender counts for at most this share of the cleaned revenue
 
 
 @dataclass
@@ -81,6 +88,44 @@ def annuity_principal(payment: float, r: float, n: int) -> float:
     if r == 0:
         return payment * n
     return payment * (1 - (1 + r) ** -n) / r
+
+
+def _in_window(f: Inflow, now: int, p: Policy) -> bool:
+    return 0 <= now - f.ts < p.lookback_buckets * p.payment_interval
+
+
+def _clean(inflows: list[Inflow], now: int, p: Policy, own_funded: frozenset | set = frozenset()):
+    """(kept and capped, notes, kept before the cap)."""
+    notes: list[str] = []
+    first: dict[str, int] = {}
+    for f in inflows:
+        first[f.sender] = min(first.get(f.sender, f.ts), f.ts)
+    min_age = p.min_sender_age_intervals * p.payment_interval
+    new = {s for s, t in first.items() if now - t < min_age}
+    dropped = (new | set(own_funded)) & set(first)
+    for s in sorted(dropped):
+        why = "funded by the borrower's own wallets" if s in own_funded else f"new (first seen under {p.min_sender_age_intervals} intervals ago)"
+        lost = sum(f.drops for f in inflows if f.sender == s and _in_window(f, now, p))
+        notes.append(f"ignored sender {s}: {why}, {fmt_xrp(lost)} XRP not counted")
+    kept = [f for f in inflows if f.sender not in dropped]
+
+    totals: dict[str, int] = {}
+    for f in kept:
+        if _in_window(f, now, p):
+            totals[f.sender] = totals.get(f.sender, 0) + f.drops
+    whole = sum(totals.values())
+    cap = int(p.max_sender_share * whole)
+    capped = {s: t for s, t in totals.items() if t > cap}
+    for s in sorted(capped):
+        notes.append(f"sender {s} is {capped[s] / whole:.0%} of revenue, counted at {p.max_sender_share:.0%}")
+    out = [replace(f, drops=f.drops * cap // capped[f.sender]) if f.sender in capped else f for f in kept]
+    return out, notes, kept
+
+
+def clean_inflows(inflows: list[Inflow], now: int, p: Policy, own_funded: frozenset | set = frozenset()) -> tuple[list[Inflow], list[str]]:
+    """Drop senders that are too new or funded by the borrower's own wallets, then cap any single sender."""
+    out, notes, _ = _clean(inflows, now, p, own_funded)
+    return out, notes
 
 
 def measure(inflows: list[Inflow], now: int, p: Policy) -> Metrics:
@@ -140,9 +185,14 @@ def tier_for(s: int) -> str:
     return "A" if s >= 75 else "B" if s >= 60 else "C" if s >= 45 else "D"
 
 
-def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, requested_drops: int | None = None) -> Offer:
+def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, requested_drops: int | None = None,
+               own_funded: frozenset | set = frozenset()) -> Offer:
     p = p or Policy()
-    m = measure(inflows, now, p)
+    counted, cleaning, uncapped = _clean(inflows, now, p, own_funded)
+    m = measure(counted, now, p)
+    # customer spread is scored on real shares; the cap only limits how much one sender can lift the loan size
+    real = measure(uncapped, now, p)
+    m.top_sender_share, m.senders = real.top_sender_share, real.senders
     s, notes = score(m, p)
     tier = tier_for(s)
     declines: list[str] = []
@@ -168,7 +218,7 @@ def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, request
     if principal_i <= 0 and not declines:
         declines.append("conservative inflow is zero")
 
-    reasons = notes + [
+    reasons = notes + cleaning + [
         f"average inflow {fmt_xrp(int(m.mean))} XRP per interval, conservative {fmt_xrp(int(m.conservative))} XRP",
         f"installment kept at or below conservative inflow / {p.coverage_target:g}",
         f"tier {tier}: rate {rate_pct:.1f}% a year",
