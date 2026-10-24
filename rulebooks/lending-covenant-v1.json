@@ -17,5 +17,21 @@
     },
     "quorum": 3
   },
-  "approved_suppliers": {}
+  "approved_suppliers": {
+    "rpABm5e6D9AVRj6jwVso4v1bPZE8Mhiaej": {
+      "cap_drops": 20000000,
+      "invoice_ref": "PO-1001"
+    }
+  },
+  "terms": {
+    "broker_id": "9FADEE49B3A94ECE8F98324EA9188DC0200FB5F4D3184328191FEEBCD12BAD81",
+    "principal": 15465412,
+    "interest_rate_units": 8000,
+    "payment_total": 6,
+    "payment_interval": 120,
+    "grace_period": 120,
+    "origination_fee": 0,
+    "service_fee": 50000
+  },
+  "agreement_hash": "39CDAC58840B9AA8C630DE6B581F05227DEC05692C7E639AA6D9704B1CA525F5"
 }
