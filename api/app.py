@@ -31,10 +31,17 @@ SC = None
 AUTO = {"revenue": True, "autopilot": MODE != "sim", "revenue_xrp": float(os.environ.get("LOCKBOX_REVENUE_XRP", "2.5"))}
 
 
+SUPPLIER_INVOICE = "PO-1001"
+
+
 def make():
     if MODE == "sim":
+        from xrpl.wallet import Wallet
         from lockbox.simsetup import build
-        return build(INTERVAL)
+        s = build(INTERVAL)
+        # the exporter's supplier, approved by the lender before the loan (the list is frozen into the agreement hash)
+        s.approve_payee(Wallet.create().address, cap_drops=xrp_to_drops(100), invoice_ref=SUPPLIER_INVOICE)
+        return s
     from lockbox import devnet
     return devnet.build(INTERVAL)
 
@@ -166,6 +173,51 @@ def withdraw(b: Body):
             amt = st["free_cash"]
         v, r = s.agent.withdraw(amt)
         return {"amount": amt, "verdict": v.to_dict(), "ok": bool(r and r.ok)}
+    return guarded(go)
+
+
+@app.post("/api/own_wallet")
+def own_wallet():
+    """Send the loan money (unspent principal) to the business's own wallet. The referee should refuse."""
+    def go():
+        s = sc()
+        bk = s.state()["buckets"] or {}
+        amt = bk.get("unspent_principal") or xrp_to_drops(1)
+        v, r = s.agent.withdraw(amt)
+        return {"amount": amt, "verdict": v.to_dict(), "ok": bool(r and r.ok)}
+    return guarded(go)
+
+
+@app.post("/api/pay_supplier")
+def pay_supplier(b: Body):
+    """Pay the first approved supplier with its invoice memo: by default everything the loan and free cash allow."""
+    def go():
+        s = sc()
+        st = s.state()
+        if not st["approved_payees"]:
+            raise HTTPException(400, "no approved supplier: the lender approves suppliers before the loan")
+        addr, p = next(iter(st["approved_payees"].items()))
+        bk = st["buckets"] or {}
+        left = p["cap_drops"] - (bk.get("paid_to_payees") or {}).get(addr, 0)
+        amt = xrp_to_drops(b.xrp) if b.xrp is not None else min(left, bk.get("unspent_principal", 0) + bk.get("earned_free_cash", 0))
+        v, r = s.agent.pay_payee(addr, max(1, amt), p["invoice_ref"])
+        return {"amount": amt, "to": addr, "verdict": v.to_dict(), "ok": bool(r and r.ok)}
+    return guarded(go)
+
+
+@app.post("/api/payoff")
+def payoff():
+    def go():
+        v, r = sc().pay_off()
+        return {"verdict": v.to_dict(), "ok": bool(r and r.ok), "code": r.code if r else None}
+    return guarded(go)
+
+
+@app.post("/api/release")
+def release():
+    def go():
+        v, r = sc().release()
+        return {"verdict": v.to_dict(), "ok": bool(r and r.ok), "code": r.code if r else None}
     return guarded(go)
 
 
