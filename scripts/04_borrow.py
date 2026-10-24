@@ -9,7 +9,11 @@ from lockbox.chain import explorer
 from lockbox.units import fmt_xrp
 
 sc = devnet.build()
-if sc.b.lockbox_state(sc.lockbox)["master_disabled"]:
+st = sc.b.lockbox_state(sc.lockbox)
+if st["master_disabled"] and not st["signers"]:
+    raise SystemExit("this lockbox was released after repayment: the borrower holds it again through its regular key. "
+                     "Use a fresh lockbox wallet for a new loan.")
+if st["master_disabled"]:
     print("lockbox is already locked")
 else:
     sc.lock()

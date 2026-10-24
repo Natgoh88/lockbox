@@ -103,6 +103,8 @@ Deterministic, no model. Revenue is bucketed by payment interval from `account_t
 6. Number fields (`PeriodicPayment`, `TotalValueOutstanding`) are parsed by `chain._num`. Check them against a real ledger entry.
 7. Found on the first run: with `LendingProtocolV1_1` enabled, `LoanBrokerSet` returns `tecNO_PERMISSION` unless the vault is closed-ended. `02_lend_setup.py` now makes one: deposits until the subscription date (default 5 min), loans only after it, and every loan must end 60 s before the redemption date (default 75 min later). Run `04_borrow.py` after the subscription date.
 8. Also found on the first run: the account-creating faucet payment counted as revenue (now ignored); `XrplChain` had no ledger clock for the referee (added); `PeriodicPayment` is fractional and rippled rounds it up, so truncating it made `LoanPay` fail with `tecINSUFFICIENT_PAYMENT` (now rounded up). If the servicer is started past the grace period it defaults the loan on its first tick, so start it right after `04_borrow.py`.
+9. Checked on Devnet: a repaid Loan can still be read with `ledger_entry` (zero fields are left out) until someone sends `LoanDelete`. Release after full repayment works: referee plus borrower set the borrower's key as the regular key, then the borrower removes the signer list with it. A released lockbox cannot take a new loan, so use a fresh lockbox wallet.
+10. In a closed-ended vault, LoanSet checks that the last payment date (start plus interval times payments) is at least 60 s before the redemption date. The grace period is not counted, so a late final payment can land after depositors may redeem.
 
 ## Layout
 
@@ -137,3 +139,7 @@ tests/                 unit, sim end-to-end, offline signing checks
 - `.wallets.json` holds Devnet seeds. It is gitignored. Do not use these wallets anywhere real.
 - The lockbox master key is disabled on purpose and cannot be re-enabled by one party. Never run `lock()` on an account you care about.
 - Read-only scoring (script 06) signs nothing. Use it on addresses you own or public business addresses.
+
+## AI assistance
+
+We built Lockbox with help from Claude (Anthropic), used through Claude Code. It wrote and reviewed code and tests with us, ran the Devnet scripts, and read the rippled source to explain ledger errors. Every design decision, rule and number in the rulebook was chosen and checked by the team, and everything was built during the event.
