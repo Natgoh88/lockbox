@@ -181,7 +181,7 @@ class Scenario:
             "offer": None if o is None else {"approved": o.approved, "tier": o.tier, "score": o.score, "principal": o.principal_drops,
                                               "installment": o.installment_drops, "rate_units": o.interest_rate_units, "payment_total": o.payment_total, "reasons": o.reasons,
                                               "declines": o.declines, "buckets": o.metrics.buckets,
-                                              "rate_pct": o.rate_pct, "unlocked": o.unlocked},
+                                              "rate_pct": o.rate_pct, "unlocked": o.unlocked, "stress": o.stress},
             "recovery_remaining": self.policy.recovery_remaining,
             "buckets": ctx.buckets.to_dict() if ctx.buckets else None,
             "frozen": covenant.frozen_reasons(ctx),

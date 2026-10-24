@@ -47,6 +47,7 @@ class Policy:
     max_sender_share: float = 0.4  # one sender counts for at most this share of the cleaned revenue
     unlocked_rate_add_pct: float = 6.0  # OUR ASSUMPTION: extra rate for the same borrower without a lockbox
     unlocked_limit_factor: float = 0.5  # OUR ASSUMPTION: share of the limit the same borrower gets without a lockbox
+    stress_drop_pct: float = 30  # stress test: revenue falls by this much
 
 
 @dataclass
@@ -82,6 +83,7 @@ class Offer:
     metrics: Metrics
     rate_pct: float = 0.0
     unlocked: dict = field(default_factory=dict)  # the same borrower without the lockbox (our assumptions)
+    stress: dict = field(default_factory=dict)  # coverage of the installment if revenue drops stress_drop_pct
 
 
 def annuity_payment(principal: float, r: float, n: int) -> float:
@@ -214,6 +216,15 @@ def unlocked_quote(approved: bool, principal: int, rate_pct: float, p: Policy) -
     }
 
 
+def stress_test(conservative: float, installment: int, p: Policy) -> dict:
+    """Coverage = conservative inflow per interval / installment, today and after a revenue drop."""
+    stressed = conservative * (1 - p.stress_drop_pct / 100)
+    cov = conservative / installment if installment else None
+    scov = stressed / installment if installment else None
+    return {"revenue_drop_pct": p.stress_drop_pct, "conservative_inflow": int(conservative), "stressed_inflow": int(stressed),
+            "installment": installment, "coverage": cov, "stressed_coverage": scov, "still_covered": bool(scov is not None and scov >= 1.0)}
+
+
 def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, requested_drops: int | None = None,
                own_funded: frozenset | set = frozenset()) -> Offer:
     p = p or Policy()
@@ -247,11 +258,15 @@ def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, request
     if principal_i <= 0 and not declines:
         declines.append("conservative inflow is zero")
 
+    stress = stress_test(m.conservative, installment, p)
     reasons = notes + cleaning + [
         f"average inflow {fmt_xrp(int(m.mean))} XRP per interval, conservative {fmt_xrp(int(m.conservative))} XRP",
         f"installment kept at or below conservative inflow / {p.coverage_target:g}",
         f"tier {tier}: rate {rate_pct:.1f}% a year",
     ]
+    if stress["stressed_coverage"] is not None:
+        reasons.append(f"stress: if revenue drops {p.stress_drop_pct:g}%, conservative inflow covers the installment "
+                       f"{stress['stressed_coverage']:.2f} times" + ("" if stress["still_covered"] else ", NOT enough"))
     approved = not declines
     return Offer(
         approved=approved,
@@ -270,4 +285,5 @@ def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, request
         metrics=m,
         rate_pct=rate_pct,
         unlocked=unlocked_quote(approved, principal_i if approved else 0, rate_pct, p),
+        stress=stress,
     )
