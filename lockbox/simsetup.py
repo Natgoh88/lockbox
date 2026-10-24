@@ -9,7 +9,7 @@ from .sim import SimChain
 from .units import xrp_to_drops
 
 
-def build(interval: int = 120, seed_revenue: bool = True, closed_ended: bool = False, subscribe_s: int = 300, invest_s: int = 4500) -> Scenario:
+def build(interval: int = 120, seed_revenue: bool = True, closed_ended: bool = True, subscribe_s: int = 300, invest_s: int = 4500) -> Scenario:
     chain = SimChain()
     names = ["lender", "borrower", "policy", "lockbox", "payout", "cust1", "cust2", "cust3"]
     addr = {n: Wallet.create().address for n in names}

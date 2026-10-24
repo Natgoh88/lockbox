@@ -42,7 +42,14 @@ def test_loan_ending_too_close_to_redemption_refused():
     assert not r.ok and r.code == "tecNO_PERMISSION"
 
 
-def test_open_ended_vault_is_still_the_default(sc):
+def test_build_makes_a_closed_ended_vault_like_devnet(sc):
+    v = sc.state()["vault"]
+    assert v["closed_ended"] is True and v["redemption"] - v["subscription"] == 4500
+    assert sc.b.lockbox_state(sc.lockbox)["regular_key"] is None  # an address or None, never ""
+
+
+def test_open_ended_vault_still_works_when_asked_for():
+    sc = build(closed_ended=False)
     assert sc.state()["vault"]["closed_ended"] is False
     r = sc.b.submit(sc.b.prepare(P.as_dict(P.vault_deposit(sc.servicer.address, sc.vault_id, xrp_to_drops(10)))), [sc.lender])
     assert r.ok
