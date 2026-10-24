@@ -14,7 +14,7 @@ One person drives the dashboard, one person talks. Total: 180 seconds.
   4. [Final repayment](https://devnet.xrpl.org/transactions/B80FD8747D54985C987B85269E6868C1AD67ABE297E0D09DE216D14F8E099CB1): LoanPay 6 of 6
   5. [Release step 1](https://devnet.xrpl.org/transactions/150B823E889725379A0952086EF28281542721ECC97B3DA71324516F8E174AE6) and [step 2](https://devnet.xrpl.org/transactions/0817045C8C26D8B5EA1D629923BB94FE158758475009DF75E82E49EB3ADA23DE): the account goes back to the borrower
   6. [Default](https://devnet.xrpl.org/transactions/1792A17BAD9881CEDB33C62DA2AB32C34B9DF74145F63C9604BA64527A871EB8): first-loss cover pays before depositors
-  7. The good-path verify table in DEVNET.md ("verify.py --devnet, good path"): 12 of 12 match
+  7. The good-path verify table in DEVNET.md ("verify.py --devnet, good path"): every referee decision matched
 - Have the backup video open in another tab, paused at the start.
 
 ## The script
@@ -29,7 +29,7 @@ One person drives the dashboard, one person talks. Total: 180 seconds.
 | 6 | 15 | **Pay approved supplier** | "Paying the supplier on the invoice is allowed, up to the approved amount, with the invoice number on the payment." |
 | 7 | 30 | **Advance 10 min, buyers stop paying**, then **Try to withdraw everything** | "Sales stop. Repayment comes first, so the account freezes on ledger facts: a payment is past due. If cash came back the servicer would take a late payment first. There is none, so the loan defaults. First-loss cover pays the depositors before they lose anything. And the owner still can't empty the account." |
 | 8 | 30 | Terminal: `python scripts/verify.py` | "Why trust the referee? Anyone can check it. This takes the published rulebook, checks its fingerprint against the one on the ledger, then replays every decision the referee made from the ledger history. Every row says matches: yes." |
-| 9 | 20 | The Devnet tabs, in order | "And this is not only a simulation. On XRPL Devnet: the rulebook fingerprint on the broker, the loan with the signed agreement hash, loan money paid to the supplier, the last repayment, the account handed back, a default where cover paid first, and verify matching all 12 referee decisions." |
+| 9 | 20 | The Devnet tabs, in order | "And this is not only a simulation. On XRPL Devnet: the rulebook fingerprint on the broker, the loan with the signed agreement hash, loan money paid to the supplier, the last repayment, the account handed back, a default where cover paid first, and verify showing every referee decision matched." |
 
 If there is time left over, run `python scripts/verify.py --tamper-verdict` and show the row that says NO.
 
