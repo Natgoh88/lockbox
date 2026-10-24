@@ -107,3 +107,13 @@ def test_periodic_payment_rounds_up_like_rippled():
     c._entry = lambda index: {"PeriodicPayment": "2096360.733564440452", "LoanServiceFee": "50000", "NextPaymentDueDate": 846184981,
                               "PaymentRemaining": 6, "TotalValueOutstanding": "12578165"}
     assert c.loan_view("L").installment == 2146361
+
+
+def test_broker_view_returns_the_data_field():
+    # the referee refuses a LoanSet unless the broker's Data holds its rulebook hash
+    c = XrplChain("http://127.0.0.1:1")
+    c._entry = lambda index: {"CoverAvailable": "15000000", "DebtTotal": "0", "CoverRateMinimum": 25000, "CoverRateLiquidation": 100000,
+                              "Data": "66FC381D1B04C6813F437B392C708EFE8EFABA9EB33963958B0FC75E546055EB"}
+    assert c.broker_view("B").data == "66FC381D1B04C6813F437B392C708EFE8EFABA9EB33963958B0FC75E546055EB"
+    c._entry = lambda index: {}
+    assert c.broker_view("B").data == ""

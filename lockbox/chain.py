@@ -145,7 +145,8 @@ class XrplChain:
     def broker_view(self, broker_id: str) -> BrokerView:
         n = self._entry(broker_id) or {}
         return BrokerView(cover_available=_num(n.get("CoverAvailable")), debt_total=_num(n.get("DebtTotal")),
-                          cover_rate_minimum=int(n.get("CoverRateMinimum", 0)), cover_rate_liquidation=int(n.get("CoverRateLiquidation", RATE_UNITS)))
+                          cover_rate_minimum=int(n.get("CoverRateMinimum", 0)), cover_rate_liquidation=int(n.get("CoverRateLiquidation", RATE_UNITS)),
+                          data=n.get("Data", ""))
 
     def vault_view(self, vault_id: str) -> VaultView:
         v = self.c.request(VaultInfo(vault_id=vault_id)).result.get("vault", {})
