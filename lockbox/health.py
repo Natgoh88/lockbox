@@ -21,6 +21,9 @@ class VaultView:
     assets_total: int
     assets_available: int
     loss_unrealized: int = 0
+    closed_ended: bool = False
+    subscription: int | None = None  # unix seconds: deposits close, loans may start
+    redemption: int | None = None  # unix seconds: depositors may redeem; loans must end before it
 
 
 def required_cover(b: BrokerView) -> int:

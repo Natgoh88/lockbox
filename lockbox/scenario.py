@@ -66,9 +66,17 @@ class Scenario:
             time.sleep(seconds)
 
     # ---- the lender side ----
-    def setup_lender(self, deposit_drops: int, cover_drops: int, debt_max: int = 500_000_000, cover_min_pct: float = 25.0) -> None:
+    def setup_lender(self, deposit_drops: int, cover_drops: int, debt_max: int = 500_000_000, cover_min_pct: float = 25.0,
+                     closed_ended: bool = False, subscribe_s: int = 300, invest_s: int = 4500) -> None:
+        """closed_ended: deposits stay open subscribe_s seconds, loans may start after that and must end before the
+        redemption date invest_s seconds later (what LendingProtocolV1_1 requires on Devnet)."""
         la = addr_of(self.lender)
-        v = self._send(P.vault_create(la), self.lender, "VaultCreate")
+        if closed_ended:
+            sub = self.b.now() + subscribe_s
+            v = self._send(P.vault_create(la, closed_ended=True, subscription_unix=sub, redemption_unix=sub + invest_s), self.lender,
+                           "VaultCreate (closed-ended)")
+        else:
+            v = self._send(P.vault_create(la), self.lender, "VaultCreate")
         self.vault_id = v.created["Vault"]
         self._send(P.vault_deposit(la, self.vault_id, deposit_drops), self.lender, "VaultDeposit")
         self.rulebook_hash = covenant.rulebook_hash(self.params.rulebook())
@@ -165,7 +173,8 @@ class Scenario:
             "broker": None if broker is None else {"cover": broker.cover_available, "debt": broker.debt_total,
                                                    "cover_ratio": None if health.cover_ratio(broker) == float("inf") else round(health.cover_ratio(broker), 2)},
             "vault": None if vault is None else {"total": vault.assets_total, "available": vault.assets_available,
-                                                 "utilization": round(health.utilization(vault), 3), "loss_unrealized": vault.loss_unrealized},
+                                                 "utilization": round(health.utilization(vault), 3), "loss_unrealized": vault.loss_unrealized,
+                                                 "closed_ended": vault.closed_ended, "subscription": vault.subscription, "redemption": vault.redemption},
             "offer": None if o is None else {"approved": o.approved, "tier": o.tier, "score": o.score, "principal": o.principal_drops,
                                               "installment": o.installment_drops, "rate_units": o.interest_rate_units, "payment_total": o.payment_total, "reasons": o.reasons,
                                               "declines": o.declines, "buckets": o.metrics.buckets},

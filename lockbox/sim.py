@@ -18,6 +18,7 @@ from .underwrite import annuity_payment
 from .units import RATE_UNITS, period_rate, ripple_to_unix, unix_to_ripple
 
 ASF_DISABLE_MASTER = 4
+LOAN_END_MARGIN = 60  # a loan on a closed-ended vault must end this many seconds before the redemption date
 LEDGER_SECONDS = 4  # a new ledger closes every few seconds on XRPL
 FIRST_LEDGER = 1_000
 SIM_LAST_LEDGER_OFFSET = 10  # prepare() fills LastLedgerSequence this far ahead, the referee's maximum
@@ -118,7 +119,8 @@ class SimChain:
 
     def vault_view(self, vault_id: str) -> VaultView:
         v = self.vaults[vault_id]
-        return VaultView(assets_total=v["total"], assets_available=v["available"], loss_unrealized=v["loss_unrealized"])
+        return VaultView(assets_total=v["total"], assets_available=v["available"], loss_unrealized=v["loss_unrealized"],
+                         closed_ended=bool(v.get("closed")), subscription=v.get("subscription"), redemption=v.get("redemption"))
 
     # ---- helpers ----
     def _id(self, kind: str) -> str:
@@ -250,12 +252,17 @@ class SimChain:
         self._charge_fee(tx)
         vid = self._id("vault")
         self.vaults[vid] = {"owner": tx["Account"], "total": 0, "available": 0, "loss_unrealized": 0}
+        if int(tx.get("VaultKind", 0)) == 1:  # closed-ended (LendingProtocolV1_1)
+            self.vaults[vid].update(closed=True, subscription=ripple_to_unix(int(tx["SubscriptionDate"])),
+                                    redemption=ripple_to_unix(int(tx["RedemptionDate"])))
         return self._log(tx, "tesSUCCESS", {"AffectedNodes": [{"CreatedNode": {"LedgerEntryType": "Vault", "LedgerIndex": vid}}]})
 
     def _do_VaultDeposit(self, tx: dict) -> Result:
         v = self.vaults[tx["VaultID"]]
         amt = int(tx["Amount"])
         a = self.accounts[tx["Account"]]
+        if v.get("closed") and self.t >= v["subscription"]:  # deposits only before the subscription date
+            return self._log(tx, "tecNO_PERMISSION")
         if a.balance - amt < self._reserve:
             return self._log(tx, "tecUNFUNDED")
         self._charge_fee(tx)
@@ -299,6 +306,11 @@ class SimChain:
         interval = int(tx["PaymentInterval"])
         if interval < 60:
             return self._log(tx, "tecKILLED")
+        if v.get("closed"):
+            # loans only after the subscription date, and the last payment before the redemption date (less a margin).
+            # The exact error code and whether the grace period counts are still to confirm on Devnet.
+            if self.t < v["subscription"] or self.t + n * interval > v["redemption"] - LOAN_END_MARGIN:
+                return self._log(tx, "tecNO_PERMISSION")
         if principal > v["available"]:
             return self._log(tx, "tecINSUFFICIENT_FUNDS")
         if b["debt_total"] + principal > b["debt_max"]:

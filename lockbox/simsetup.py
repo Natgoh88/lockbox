@@ -9,7 +9,7 @@ from .sim import SimChain
 from .units import xrp_to_drops
 
 
-def build(interval: int = 120, seed_revenue: bool = True) -> Scenario:
+def build(interval: int = 120, seed_revenue: bool = True, closed_ended: bool = False, subscribe_s: int = 300, invest_s: int = 4500) -> Scenario:
     chain = SimChain()
     names = ["lender", "borrower", "policy", "lockbox", "payout", "cust1", "cust2", "cust3"]
     addr = {n: Wallet.create().address for n in names}
@@ -19,7 +19,8 @@ def build(interval: int = 120, seed_revenue: bool = True) -> Scenario:
         chain.fund(addr[n], xrp_to_drops(xrp))
     sc = Scenario(b=chain, lender=addr["lender"], borrower=borrower, policy_key=addr["policy"], lockbox_key=addr["lockbox"],
                   payout=addr["payout"], customers=[addr["cust1"], addr["cust2"], addr["cust3"]], uw=demo_policy(interval))
-    sc.setup_lender(deposit_drops=xrp_to_drops(300), cover_drops=xrp_to_drops(40))
+    sc.setup_lender(deposit_drops=xrp_to_drops(300), cover_drops=xrp_to_drops(40), closed_ended=closed_ended, subscribe_s=subscribe_s,
+                    invest_s=invest_s)
     if seed_revenue:
         # six intervals of steady revenue from three customers, a little uneven like real life
         pattern = [32, 41, 36, 44, 39, 42]
