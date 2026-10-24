@@ -369,9 +369,11 @@ class SimChain:
         if tx["Account"] != b["owner"]:
             return self._log(tx, "tecNO_PERMISSION")
         flags = int(tx.get("Flags", 0))
-        if flags == 131072:  # impair
+        if flags == 131072:  # impair: only once a payment is past due
             if ln.defaulted or ln.remaining <= 0:
                 return self._log(tx, "tecNO_PERMISSION")
+            if self.t <= ln.next_due:
+                return self._log(tx, "tecTOO_SOON")
             self._charge_fee(tx)
             ln.impaired = True
             v["loss_unrealized"] = ln.principal_out

@@ -100,14 +100,20 @@ def test_loan_money_to_own_wallet(funded):
 
 def test_lender_impair_does_not_freeze_a_healthy_borrower(funded):
     # the lender flags a loan that is not late, hoping to lock up the borrower's own earnings
+    from dataclasses import replace
+    from lockbox import covenant
     funded.earn(xrp_to_drops(10))
     loan_id = funded.servicer.loan_id
-    r = funded._send(P.loan_manage(addr_of(funded.lender), loan_id, "impair"), funded.lender, "impair")
-    assert r.ok
-    ln = funded.b.loan_view(loan_id)
-    assert ln.impaired and funded.b.now() <= ln.next_due
+    tx = funded.b.prepare(P.as_dict(P.loan_manage(addr_of(funded.lender), loan_id, "impair")))
+    r = funded.b.submit(tx, [funded.lender])
+    assert not r.ok and r.code == "tecTOO_SOON"  # the ledger only allows impair after the due date
+    assert not funded.b.loan_view(loan_id).impaired
     free = funded.state()["buckets"]["earned_free_cash"]
     assert free > 0
+    # even if the flag were set on a current loan, the rulebook would not freeze on it
+    ctx = funded.policy.context()
+    ctx.loan = replace(ctx.loan, impaired=True)
+    assert covenant.frozen_reasons(ctx) == []
     v, r = funded.agent.withdraw(free)
     assert v.allowed and r.ok, v.reason
 

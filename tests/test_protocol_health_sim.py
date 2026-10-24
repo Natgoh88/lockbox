@@ -94,3 +94,17 @@ def test_sim_cannot_disable_master_without_alternative_key():
     a = addr()
     c.fund(a, 20_000_000)
     assert c.submit(c.prepare(P.as_dict(P.lockdown_disable_master(a))), [a]).code == "tecNO_ALTERNATIVE_KEY"
+
+
+def test_sim_impair_only_after_the_due_date(loaned):
+    from lockbox.backend import addr_of
+    sc = loaned
+    lid = sc.servicer.loan_id
+
+    def impair():
+        return sc.b.submit(sc.b.prepare(P.as_dict(P.loan_manage(addr_of(sc.lender), lid, "impair"))), [sc.lender])
+
+    assert impair().code == "tecTOO_SOON"
+    assert not sc.b.loan_view(lid).impaired
+    sc.b.advance(sc.b.loan_view(lid).next_due - sc.b.now() + 1)
+    assert impair().ok and sc.b.loan_view(lid).impaired
