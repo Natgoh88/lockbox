@@ -133,3 +133,17 @@ def test_regular_key_signs_alone_for_the_account():
     blob = signed.to_xrpl()
     assert decode(encode(blob))["SigningPubKey"] == regular.public_key
     assert is_valid_message(bytes.fromhex(encode_for_signing(blob)), bytes.fromhex(signed.txn_signature), regular.public_key)
+
+
+def test_vault_view_reads_the_closed_ended_dates():
+    from lockbox.units import ripple_to_unix
+
+    class VaultClient:
+        def request(self, req):
+            return type("R", (), {"result": {"vault": {"AssetsTotal": "50000017", "AssetsAvailable": "39255331", "VaultKind": 1,
+                                                       "SubscriptionDate": 846191051, "RedemptionDate": 846195551}}})()
+    c = XrplChain("http://127.0.0.1:1")
+    c.c = VaultClient()
+    v = c.vault_view("V")
+    assert v.closed_ended and v.subscription == ripple_to_unix(846191051) and v.redemption == ripple_to_unix(846195551)
+    assert v.redemption - v.subscription == 4500

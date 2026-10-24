@@ -150,8 +150,11 @@ class XrplChain:
 
     def vault_view(self, vault_id: str) -> VaultView:
         v = self.c.request(VaultInfo(vault_id=vault_id)).result.get("vault", {})
+        sub, red = v.get("SubscriptionDate"), v.get("RedemptionDate")
         return VaultView(assets_total=_num(v.get("AssetsTotal")), assets_available=_num(v.get("AssetsAvailable")),
-                         loss_unrealized=_num(v.get("LossUnrealized")))
+                         loss_unrealized=_num(v.get("LossUnrealized")), closed_ended=int(v.get("VaultKind", 0)) == 1,
+                         subscription=ripple_to_unix(int(sub)) if sub is not None else None,
+                         redemption=ripple_to_unix(int(red)) if red is not None else None)
 
     def feature_enabled(self, name: str) -> bool:
         feats = self.c.request(Feature()).result.get("features", {})
