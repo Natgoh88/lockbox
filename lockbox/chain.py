@@ -125,7 +125,7 @@ class XrplChain:
             quorum = int(lists[0].get("SignerQuorum", 0))
             signers = {e["SignerEntry"]["Account"]: int(e["SignerEntry"]["SignerWeight"]) for e in lists[0].get("SignerEntries", [])}
         return {"master_disabled": bool(int(data.get("Flags", 0)) & LSF_DISABLE_MASTER), "signers": signers, "quorum": quorum,
-                "regular_key": "RegularKey" in data}
+                "regular_key": data.get("RegularKey")}  # the address, or None, like the sim
 
     def _entry(self, index: str) -> dict | None:
         res = self.c.request(LedgerEntry(index=index, ledger_index="validated")).result

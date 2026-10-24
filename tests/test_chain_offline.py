@@ -159,3 +159,18 @@ def test_saved_payees_are_applied_to_a_scenario(tmp_path, monkeypatch):
     assert chain.apply_payees(sc) == 1
     p = sc.params.approved_payees["rSupplier"]
     assert p.cap_drops == 20_000_000 and p.invoice_ref == "PO-1001"
+
+
+def test_lockbox_state_gives_the_regular_key_address_like_the_sim():
+    class InfoClient:
+        def __init__(self, data):
+            self.data = data
+
+        def request(self, req):
+            return type("R", (), {"result": {"account_data": self.data, "signer_lists": []}})()
+    c = XrplChain("http://127.0.0.1:1")
+    c.c = InfoClient({"Flags": 0x00100000, "RegularKey": "rBorrowerKey"})
+    st = c.lockbox_state("rLockbox")
+    assert st["regular_key"] == "rBorrowerKey" and st["master_disabled"] and st["signers"] == {}
+    c.c = InfoClient({"Flags": 0})
+    assert c.lockbox_state("rLockbox")["regular_key"] is None
