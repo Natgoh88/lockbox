@@ -147,7 +147,7 @@ function render() {
   $('lg-free').textContent = xrp(lb.free_cash); $('lg-inst').textContent = xrp(instHeld); $('lg-res').textContent = xrp(reserve);
   const locked = lb.master_disabled;
   $('lockchip').className = 'chip ' + (locked ? 'acc' : 'mute');
-  $('lockchip').textContent = locked ? 'locked: 2 of 3 must sign' : 'open: owner key still works';
+  $('lockchip').textContent = locked ? 'locked: referee plus one other must sign' : 'open: owner key still works';
   const sg = Object.keys(lb.signers || {});
   $('signers').textContent = sg.length ? 'Signers: ' + sg.map(short).join(', ') + ' | quorum ' + lb.quorum + (locked ? ' | master key off' : ' | master key ON') : 'Single key account';
 

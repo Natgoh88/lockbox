@@ -13,7 +13,7 @@ if sc.b.lockbox_state(sc.lockbox)["master_disabled"]:
     print("lockbox is already locked")
 else:
     sc.lock()
-    print("lockbox locked: 2 of 3 signers, master key off")
+    print("lockbox locked: referee required plus one other (referee 2, borrower 1, lender 1, quorum 3), master key off")
 o = sc.quote()
 print(f"approved={o.approved} tier={o.tier} score={o.score}")
 for line in o.reasons + o.declines:

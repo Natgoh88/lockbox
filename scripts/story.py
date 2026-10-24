@@ -22,7 +22,7 @@ sc = build()
 line(f"lockbox holds {x(sc.b.balance(sc.lockbox))} XRP, revenue history is on the ledger")
 sc.lock()
 st = sc.b.lockbox_state(sc.lockbox)
-line(f"locked: master key off = {st['master_disabled']}, quorum {st['quorum']} of {len(st['signers'])} signers")
+line(f"locked: master key off = {st['master_disabled']}, referee required plus one other (quorum {st['quorum']})")
 o = sc.quote()
 line(f"underwriting: score {o.score}, tier {o.tier}, offer {x(o.principal_drops)} XRP, installment {x(o.installment_drops)} XRP")
 for r in o.reasons:

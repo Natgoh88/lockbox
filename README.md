@@ -7,7 +7,7 @@ Built for the AI & Fintech XRPL Hackathon, Lending & Borrowing track. Only work 
 ## The idea in three lines
 
 1. XLS-66 loans are uncollateralized and the protocol deliberately leaves underwriting and enforcement off-chain. Nothing stops a borrower from moving the money away after the loan is funded.
-2. Lockbox makes the borrower's revenue account a 2-of-3 multisig (borrower, lender, neutral referee) with the master key switched off. A rulebook the referee applies decides which transactions get its signature. The borrower can spend freely, but never the next installment.
+2. Lockbox makes the borrower's revenue account a multisig (borrower, lender, neutral referee) with the master key switched off. The referee is required on every payment, plus one of the other two. A rulebook the referee applies decides which transactions get its signature. The borrower can spend freely, but never the next installment.
 3. The loan is sized from the account's own ledger history (what really arrived), and the lender collects, impairs, defaults and recovers with the referee, with no borrower signature needed.
 
 ## Honest status
@@ -52,9 +52,9 @@ python scripts/06_score_address.py rYourAddress  # read-only underwriting of a r
 ## How it works
 
 ```
-customers ──pay──> LOCKBOX account (2-of-3, master key off)
-                      signers: borrower agent · lender servicer · policy referee
-                      any two signatures move money, the referee only signs what covenant.py allows
+customers ──pay──> LOCKBOX account (quorum 3, master key off)
+                      signers: policy referee (weight 2) · borrower agent (1) · lender servicer (1)
+                      referee plus one other moves money, the referee only signs what covenant.py allows
 
 lender (vault owner + broker owner)
    VaultCreate, VaultDeposit, LoanBrokerSet, LoanBrokerCoverDeposit       first-loss cover
@@ -63,9 +63,9 @@ lender (vault owner + broker owner)
    LoanManage impair / default, signed by the lender
 ```
 
-Why 2-of-3: the borrower alone cannot spend the lender's money, the lender alone cannot touch the borrower's cash, the referee alone can do nothing, and the lender plus referee can collect and recover even if the borrower disappears.
+Why the referee is required: the borrower alone cannot spend the lender's money, the lender alone cannot touch the borrower's cash, the referee alone can do nothing, and the lender plus referee can collect and recover even if the borrower disappears. Borrower plus lender cannot move money without the referee either, so a broker working with a fake borrower cannot drain the account and leave the depositors with the loss.
 
-Why the lockbox is locked BEFORE the loan: `LoanSet` needs a counterparty signature, and xrpl-py allows that signature to be multi-signed. The first party must be single-signed, so the lender is the first party and the lockbox is the counterparty. The lender reads the lockbox's on-ledger state (master key off, no regular key, exactly the three signers, quorum 2) and refuses to originate if any of it is wrong.
+Why the lockbox is locked BEFORE the loan: `LoanSet` needs a counterparty signature, and xrpl-py allows that signature to be multi-signed. The first party must be single-signed, so the lender is the first party and the lockbox is the counterparty. The lender reads the lockbox's on-ledger state (master key off, no regular key, exactly the three signers with referee weight 2, borrower 1, lender 1, quorum 3) and refuses to originate if any of it is wrong.
 
 ### The covenant (lockbox/covenant.py)
 
@@ -100,6 +100,7 @@ Deterministic, no model. Revenue is bucketed by payment interval from `account_t
 4. Early `LoanPay` (before the due date). The servicer pays at 25% of the interval before the due date. If the ledger rejects early payments, set `Params.pay_lead_fraction = 0`.
 5. `LoanPay` with `tfLoanLatePayment`: the amount must match the ledger's exact late amount. With no late fee or late interest set on the loan it should equal the installment.
 6. Number fields (`PeriodicPayment`, `TotalValueOutstanding`) are parsed by `chain._num`. Check them against a real ledger entry.
+7. Found on the first run: with `LendingProtocolV1_1` enabled, `LoanBrokerSet` returns `tecNO_PERMISSION` unless the vault is closed-ended. `02_lend_setup.py` now makes one: deposits until the subscription date (default 5 min), loans only after it, and every loan must end 60 s before the redemption date (default 75 min later). Run `04_borrow.py` after the subscription date.
 
 ## Layout
 
