@@ -13,6 +13,10 @@ Before measuring, senders are cleaned (clean_inflows):
   a sender first seen fewer than min_sender_age_intervals ago is ignored (too new to trust)
   a sender the borrower's own wallets ever paid (own_funded, found by inflows.funded_by) is ignored
   no single sender counts for more than max_sender_share of the cleaned revenue
+
+Every offer also carries the same borrower priced WITHOUT the lockbox (Offer.unlocked). Those terms
+are our assumptions, not market data: rate plus unlocked_rate_add_pct points, limit times
+unlocked_limit_factor, because without the lockbox a lender cannot stop the cash leaving.
 """
 from __future__ import annotations
 
@@ -41,6 +45,8 @@ class Policy:
     service_fee_drops: int = 0
     min_sender_age_intervals: int = 2  # senders first seen more recently than this are not counted
     max_sender_share: float = 0.4  # one sender counts for at most this share of the cleaned revenue
+    unlocked_rate_add_pct: float = 6.0  # OUR ASSUMPTION: extra rate for the same borrower without a lockbox
+    unlocked_limit_factor: float = 0.5  # OUR ASSUMPTION: share of the limit the same borrower gets without a lockbox
 
 
 @dataclass
@@ -74,6 +80,8 @@ class Offer:
     reasons: list[str]
     declines: list[str]
     metrics: Metrics
+    rate_pct: float = 0.0
+    unlocked: dict = field(default_factory=dict)  # the same borrower without the lockbox (our assumptions)
 
 
 def annuity_payment(principal: float, r: float, n: int) -> float:
@@ -185,6 +193,27 @@ def tier_for(s: int) -> str:
     return "A" if s >= 75 else "B" if s >= 60 else "C" if s >= 45 else "D"
 
 
+def unlocked_quote(approved: bool, principal: int, rate_pct: float, p: Policy) -> dict:
+    """The same borrower priced without the lockbox. Labelled as our assumptions everywhere it is shown."""
+    rate = rate_pct + p.unlocked_rate_add_pct
+    units = pct_to_units(rate)
+    pr = int(principal * p.unlocked_limit_factor) if approved else 0
+    inst = int(annuity_payment(pr, period_rate(units, p.payment_interval), p.payment_total)) + p.service_fee_drops if pr > 0 else 0
+    return {
+        "label": "without a lockbox (our assumptions, not market data)",
+        "approved": approved and pr > 0,
+        "rate_pct": rate,
+        "interest_rate_units": units,
+        "principal_drops": pr,
+        "installment_drops": inst,
+        "assumptions": [
+            "our assumption, not market data: without the lockbox the lender cannot stop the revenue leaving the account",
+            f"so we price the same borrower at +{p.unlocked_rate_add_pct:g} points",
+            f"and lend {'half' if p.unlocked_limit_factor == 0.5 else f'{p.unlocked_limit_factor:.0%}'} the limit",
+        ],
+    }
+
+
 def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, requested_drops: int | None = None,
                own_funded: frozenset | set = frozenset()) -> Offer:
     p = p or Policy()
@@ -239,4 +268,6 @@ def underwrite(inflows: list[Inflow], now: int, p: Policy | None = None, request
         reasons=reasons,
         declines=declines,
         metrics=m,
+        rate_pct=rate_pct,
+        unlocked=unlocked_quote(approved, principal_i if approved else 0, rate_pct, p),
     )
