@@ -100,7 +100,15 @@ Never cut: referee required (M1), approved payees, automatic freeze, the withdra
 - Run `pytest` before every commit.
 
 ## Team split (respect file ownership)
-- Nathaniel: covenant.py, buckets.py, roles.py, sim.py, protocol.py, scenario.py and their tests. Milestones M1, M2.
-- Teammate: chain.py, scripts/, underwrite.py, inflows.py, api/, dashboard/, README.md, tests/test_attacks.py, and the only .wallets.json. Devnet (M5), M3, M4, red-team attack tests.
+- Nathaniel: covenant.py, buckets.py, roles.py, sim.py, protocol.py, scenario.py, underwrite.py, inflows.py and their tests. Milestones M1, M2, M3.
+- Teammate: chain.py, scripts/, api/, dashboard/, README.md, tests/test_attacks.py, and the only .wallets.json. Devnet (M5), M4, red-team attack tests.
 - Never edit the other person's files without asking. Pull before starting, commit and push small changes often.
 - The dashboard depends on scenario.state(): add fields, never rename or remove existing ones.
+
+## Handoff notes for the teammate (chain.py, scripts)
+- `XrplChain.broker_view` must return the broker's Data field, or the referee refuses every LoanSet on Devnet: add `data=n.get("Data", "")` to the `BrokerView(...)` call.
+- `Params` must be identical when `02_lend_setup.py` creates the broker and when `04_borrow.py` asks for the loan, because the broker's Data holds the rulebook hash. After pulling rule changes, rerun 02.
+- Release (`BorrowerAgent.release`) step 2 signs with the lockbox's new regular key: `XrplChain.submit` must single-sign when the signer's address is the account's regular key (today it multisigns whenever signer != account).
+
+## Roadmap (not built, say it in the pitch)
+- Approving or changing suppliers while a loan is open. Today the list is frozen at loan creation because it is inside the agreement hash in the LoanSet Data field. A mid-loan change would need both the borrower's and the lender's signatures and a new hash recorded on the ledger.
