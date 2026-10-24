@@ -16,21 +16,34 @@ The tri-party lending agreement, enforced by the XRP Ledger itself.
 
 Main persona for the demo: an **SME exporter** paid by foreign buyers (customers = buyers paying invoices, approved payees = suppliers). Keep the bakery only as the simple explanation.
 
-## Where the code is today (all passing: `pytest`, 63 tests, no network)
+## Where the code is today (all passing: `pytest`, 248 tests, no network)
 
 | File | Status |
 | --- | --- |
-| `lockbox/inflows.py` | account_tx parsing, delivered_amount, XRP only. Done |
-| `lockbox/underwrite.py` | mean minus one std, coverage 2.0, annuity sizing, score and tiers. Done |
-| `lockbox/covenant.py` | Rulebook v1: LoanSet terms check, LoanPay, allowlist withdrawals, recovery after default. Needs the upgrades below |
-| `lockbox/roles.py` | BorrowerAgent, PolicyService (the referee), Servicer (collect, impair, default, recover, late pay). Needs upgrades |
-| `lockbox/sim.py` | In-memory ledger: signer quorum and weights, master key, vault, broker, loan, default, cover |
-| `lockbox/chain.py` | Real XRPL backend via xrpl-py. **Never run against a network.** Signing paths checked offline |
-| `lockbox/scenario.py`, `simsetup.py`, `devnet.py` | One story on sim or Devnet |
-| `api/app.py`, `dashboard/index.html` | Dashboard, sim mode and Devnet autopilot |
-| `scripts/01..06`, `story.py`, `offline_demo.py` | Devnet setup, lender, revenue, borrow, collect, mainnet scorer, terminal story, offline dashboard |
+| `lockbox/inflows.py` | account_tx parsing, delivered_amount, XRP only, sock-puppet funding, repaid loans. Done (M3) |
+| `lockbox/underwrite.py` | mean minus one std, coverage 2.0, annuity sizing, score and tiers, sender cleaning, locked vs unlocked, stress, graduation. Done (M3) |
+| `lockbox/buckets.py` | Buckets rebuilt from ledger history: reserve, fee buffer, bond, installment reserve, holdback, unspent principal, owner funds, earned free cash. Done |
+| `lockbox/covenant.py` | Rulebook lending-covenant v1: every M2 rule, plus the redemption-with-grace check on LoanSet. Done |
+| `lockbox/roles.py` | BorrowerAgent, PolicyService (the referee, logs a decision record with every verdict), Servicer (collect, impair, late pay, default, recover). Done |
+| `lockbox/verify.py`, `scripts/verify.py` | Checks the rulebook file against the ledger and replays every referee decision. Works on the sim; `--devnet` not yet run |
+| `lockbox/sim.py` | In-memory ledger: signer quorum and weights, master key, regular key, ledger index and sequences, closed-ended vault, broker, loan, payoff, default, cover |
+| `lockbox/chain.py` | Real XRPL backend via xrpl-py. **Has run on Devnet** (LoanSet, 6 LoanPays, release, withdraw-everything refused): see [DEVNET.md](DEVNET.md). Claude Code still never runs it against a network |
+| `lockbox/scenario.py`, `simsetup.py`, `devnet.py` | One story on sim or Devnet. The sim builds a closed-ended vault, like Devnet |
+| `api/app.py`, `dashboard/index.html` | Dashboard (M4), sim mode and Devnet autopilot |
+| `scripts/01..07`, `story.py`, `offline_demo.py` | Devnet setup, lender, revenue, borrow, collect, mainnet scorer, fresh lockbox, terminal story, offline dashboard |
+| `rulebooks/lending-covenant-v1.json` | The published rulebook: config, approved suppliers, and once a loan is accepted its terms and agreement hash |
+| `DEMO.md` | The 3-minute live demo script, fallback and Q&A |
 
-Run first: `pytest`, then `python scripts/story.py`, then `python scripts/offline_demo.py` (http://localhost:8403).
+Run first: `pytest`, then `python scripts/story.py`, then `python scripts/offline_demo.py` (http://localhost:8403), then `python scripts/verify.py`.
+
+## Decisions (Sunday morning)
+- Release after repayment (SetRegularKey, then remove the signer list) worked on Devnet.
+- Servicer: once a payment is past grace, it tries one late LoanPay first if the lockbox can cover it, and defaults only if that fails or the cash is not there.
+- The payment that created the lockbox account is the owner's own money: bucket `owner_funds`, spendable by the owner like earned free cash, but shown separately. The reserve and fee buffer come out of it first.
+- The sim builds a closed-ended vault by default (subscription 5 min, redemption 75 min later), the same as `02_lend_setup.py`.
+- The referee refuses a LoanSet if the last due date plus the grace period runs past the vault's redemption date. The ledger's own check ignores grace.
+- Rulebook identity: name `lending-covenant`, version 1, fingerprint = sha256 of name, version and config. The fingerprint is in the LoanBroker Data field, the agreement hash (terms plus approved suppliers) in the LoanSet Data field. `rulebooks/lending-covenant-v1.json` holds both sides so anyone can recompute them. A broker made before this change has the old hash: rerun `02_lend_setup.py`.
+- Every verdict event carries the rulebook name, version, fingerprint, the deciding rule and a decision record (the transaction, the history point, and the inputs the ledger cannot give for the past) so `scripts/verify.py` can replay it.
 
 ## Network facts (check, do not assume)
 
@@ -106,9 +119,10 @@ Never cut: referee required (M1), approved payees, automatic freeze, the withdra
 - The dashboard depends on scenario.state(): add fields, never rename or remove existing ones.
 
 ## Handoff notes for the teammate (chain.py, scripts)
-- `XrplChain.broker_view` must return the broker's Data field, or the referee refuses every LoanSet on Devnet: add `data=n.get("Data", "")` to the `BrokerView(...)` call.
-- `Params` must be identical when `02_lend_setup.py` creates the broker and when `04_borrow.py` asks for the loan, because the broker's Data holds the rulebook hash. After pulling rule changes, rerun 02.
-- Release (`BorrowerAgent.release`) step 2 signs with the lockbox's new regular key: `XrplChain.submit` must single-sign when the signer's address is the account's regular key (today it multisigns whenever signer != account).
+- Done: `broker_view` returns Data, and a lone regular key signs plainly for release.
+- `Params` must be identical when `02_lend_setup.py` creates the broker and when `04_borrow.py` asks for the loan, because the broker's Data holds the rulebook fingerprint. After pulling rule changes, rerun 02. The fingerprint changed on Sunday morning, so rerun 02 before the next Devnet loan.
+- On Devnet, `Scenario` writes `rulebooks/lending-covenant-v1.json` in 02 and again in 04 (with the real suppliers and terms). Commit the file 04 writes, so the published rulebook matches the Devnet loan.
+- `python scripts/verify.py --devnet` reads the referee's events from `data/events.jsonl`. Scripts only log there with `LOCKBOX_EVENTS` set, and only verdicts logged after Sunday morning carry the decision record. Not yet run on Devnet.
 
 ## Roadmap (not built, say it in the pitch)
 - Approving or changing suppliers while a loan is open. Today the list is frozen at loan creation because it is inside the agreement hash in the LoanSet Data field. A mid-loan change would need both the borrower's and the lender's signatures and a new hash recorded on the ledger.
