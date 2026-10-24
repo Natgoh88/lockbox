@@ -172,6 +172,8 @@ class CovenantContext:
     release_key: str = ""  # the borrower's registered key the account is handed back to after repayment
     rulebook_hash: str = ""  # the hash of the rules this referee enforces
     broker_data: str | None = None  # the Data field of the LoanSet's broker, read from the ledger
+    vault_redemption: int | None = None  # unix seconds the vault's depositors may redeem; None for an open-ended vault
+    vault_readable: bool = True  # False if the referee could not read the vault: the redemption check then fails closed
 
 
 @dataclass
@@ -331,6 +333,12 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
             problem = acceptance_problem(ctx.acceptance, expected, ctx.borrower)
             add("borrower_signed_terms", problem is None, problem or "")
             add("agreement_hash_in_data", str(tx.get("Data", "")).upper() == expected, f"Data must be the agreement hash {expected}")
+        if a is not None:
+            # the ledger's closed-vault check ignores grace, so a loan could still be in grace when depositors redeem
+            ends = ctx.now + a.payment_interval * a.payment_total + a.grace_period
+            add("ends_before_redemption", ctx.vault_readable and (ctx.vault_redemption is None or ends <= ctx.vault_redemption),
+                "could not read the vault" if not ctx.vault_readable else
+                f"last due date plus grace ends at {ends}, the vault redeems at {ctx.vault_redemption}")
         add("broker_rulebook_hash", bool(ctx.rulebook_hash) and str(ctx.broker_data or "").upper() == ctx.rulebook_hash.upper(),
             f"the broker's Data is {ctx.broker_data or 'empty'}, this referee's rulebook hash is {ctx.rulebook_hash or 'unset'}")
 

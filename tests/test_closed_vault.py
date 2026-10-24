@@ -1,6 +1,9 @@
 """Closed-ended vault (LendingProtocolV1_1), as 02_lend_setup.py now creates on Devnet: deposits only before the
 subscription date, loans only after it, and every loan must end at least 60 s before the redemption date."""
+import pytest
+
 from lockbox import protocol as P
+from lockbox.roles import Refused
 from lockbox.simsetup import build
 from lockbox.units import xrp_to_drops
 
@@ -33,12 +36,17 @@ def test_loan_before_the_subscription_date_refused():
     assert sc.borrow().ok
 
 
-def test_loan_ending_too_close_to_redemption_refused():
+def test_loan_ending_too_close_to_redemption_refused(monkeypatch):
     # redemption 1300 s after setup; the loan would start at 720 s and end at 1440 s
     sc = build(closed_ended=True, subscribe_s=300, invest_s=1000)
     sc.lock()
     sc.quote()
-    r = sc.borrow()
+    # the referee refuses first now (its rule counts the grace period too)
+    with pytest.raises(Refused, match="ends_before_redemption"):
+        sc.borrow()
+    # and with the referee out of the way, the ledger refuses it as well
+    monkeypatch.setattr(sc.policy, "cosign", lambda tx: sc.policy.key)
+    r = sc.servicer.originate(sc.offer, sc.agent)
     assert not r.ok and r.code == "tecNO_PERMISSION"
 
 

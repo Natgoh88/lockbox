@@ -77,7 +77,7 @@ class Scenario:
                            "VaultCreate (closed-ended)")
         else:
             v = self._send(P.vault_create(la), self.lender, "VaultCreate")
-        self.vault_id = v.created["Vault"]
+        self.vault_id = self.policy.vault_id = v.created["Vault"]
         self._send(P.vault_deposit(la, self.vault_id, deposit_drops), self.lender, "VaultDeposit")
         self.rulebook_hash = covenant.rulebook_hash(self.params.rulebook())
         br = self._send(P.broker_set(la, self.vault_id, debt_max, int(cover_min_pct * RATE_UNITS / 100), RATE_UNITS, data=self.rulebook_hash),
@@ -90,6 +90,7 @@ class Scenario:
     def attach(self, vault_id: str, broker_id: str, loan_id: str | None = None) -> None:
         """Re-attach to objects that already exist (after a restart)."""
         self.vault_id, self.broker_id = vault_id, broker_id
+        self.policy.vault_id = vault_id
         self.servicer = Servicer(self.b, self.lender, self.policy, self.lockbox, addr_of(self.borrower), addr_of(self.policy_key),
                                  broker_id, vault_id)
         if loan_id:

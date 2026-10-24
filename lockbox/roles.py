@@ -62,6 +62,7 @@ class PolicyService:
         self.recovered = 0
         self.last_verdict: Verdict | None = None
         self.outstanding: dict | None = None  # the one approval the referee has handed out and not yet seen settle
+        self.vault_id: str | None = None  # the lender's vault: a LoanSet must finish, grace included, before it redeems
 
     @property
     def address(self) -> str:
@@ -126,6 +127,7 @@ class PolicyService:
             approval=self.approval_state(tx.get("Account", self.lockbox)) if tx is not None else None,
             borrower=self.borrower, acceptance=self.acceptance, release_key=p.release_key,
             rulebook_hash=covenant.rulebook_hash(p.rulebook()), broker_data=self._broker_data(tx),
+            **self._vault_redemption(tx),
         )
 
     def _broker_data(self, tx: dict | None) -> str | None:
@@ -135,6 +137,14 @@ class PolicyService:
             return getattr(self.b.broker_view(tx.get("LoanBrokerID", "")), "data", None)
         except Exception:  # unknown broker or unreadable entry: the check fails closed
             return None
+
+    def _vault_redemption(self, tx: dict | None) -> dict:
+        if not tx or tx.get("TransactionType") != "LoanSet" or not self.vault_id:
+            return {}
+        try:
+            return {"vault_redemption": self.b.vault_view(self.vault_id).redemption}
+        except Exception:  # unreadable vault: the check fails closed
+            return {"vault_readable": False}
 
     def review(self, tx: dict) -> Verdict:
         v = covenant.evaluate(tx, self.context(tx))
