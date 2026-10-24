@@ -10,6 +10,7 @@ import time
 import _boot  # noqa: F401
 
 from lockbox import devnet
+from lockbox.chain import apply_payees
 from lockbox.units import fmt_xrp, xrp_to_drops
 
 ap = argparse.ArgumentParser()
@@ -20,6 +21,7 @@ ap.add_argument("--every", type=int, default=15)
 a = ap.parse_args()
 
 sc = devnet.build()
+apply_payees(sc)
 assert sc.servicer and sc.servicer.loan_id, "no loan yet, run 04_borrow.py"
 if a.withdraw_free:
     v, r = sc.agent.withdraw(sc.state()["lockbox"]["free_cash"])

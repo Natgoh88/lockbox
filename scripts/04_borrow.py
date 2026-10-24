@@ -5,7 +5,7 @@
 import _boot  # noqa: F401
 
 from lockbox import devnet
-from lockbox.chain import explorer
+from lockbox.chain import apply_payees, explorer
 from lockbox.units import fmt_xrp
 
 sc = devnet.build()
@@ -18,6 +18,8 @@ if st["master_disabled"]:
 else:
     sc.lock()
     print("lockbox locked: referee required plus one other (referee 2, borrower 1, lender 1, quorum 3), master key off")
+n = apply_payees(sc)  # before the loan: the approved suppliers go into the agreement hash
+print(f"{n} approved supplier(s) from data/payees.json" if n else "no approved suppliers (run 07_fresh_lockbox.py to add one)")
 o = sc.quote()
 print(f"approved={o.approved} tier={o.tier} score={o.score}")
 for line in o.reasons + o.declines:

@@ -215,6 +215,27 @@ def save_state(d: dict) -> None:
     STATE.write_text(json.dumps(d, indent=2))
 
 
+PAYEES = ROOT / "data" / "payees.json"
+
+
+def load_payees() -> dict:
+    """Lender-approved suppliers for the Devnet lockbox: {address: {"cap_drops", "invoice_ref"}}. Each script re-applies
+    them after devnet.build(), because Params only lives in memory. 04_borrow applies them before the loan, so they are
+    inside the agreement hash."""
+    return json.loads(PAYEES.read_text()) if PAYEES.exists() else {}
+
+
+def save_payees(d: dict) -> None:
+    PAYEES.parent.mkdir(parents=True, exist_ok=True)
+    PAYEES.write_text(json.dumps(d, indent=2))
+
+
+def apply_payees(sc) -> int:
+    for addr, p in load_payees().items():
+        sc.approve_payee(addr, cap_drops=int(p["cap_drops"]), invoice_ref=p["invoice_ref"])
+    return len(load_payees())
+
+
 def fund(client: JsonRpcClient) -> Wallet:
     return generate_faucet_wallet(client)
 

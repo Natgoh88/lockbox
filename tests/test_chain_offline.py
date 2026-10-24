@@ -147,3 +147,15 @@ def test_vault_view_reads_the_closed_ended_dates():
     v = c.vault_view("V")
     assert v.closed_ended and v.subscription == ripple_to_unix(846191051) and v.redemption == ripple_to_unix(846195551)
     assert v.redemption - v.subscription == 4500
+
+
+def test_saved_payees_are_applied_to_a_scenario(tmp_path, monkeypatch):
+    import lockbox.chain as chain
+    from lockbox.simsetup import build
+    monkeypatch.setattr(chain, "PAYEES", tmp_path / "payees.json")
+    sc = build()
+    assert chain.apply_payees(sc) == 0
+    chain.save_payees({"rSupplier": {"cap_drops": 20_000_000, "invoice_ref": "PO-1001"}})
+    assert chain.apply_payees(sc) == 1
+    p = sc.params.approved_payees["rSupplier"]
+    assert p.cap_drops == 20_000_000 and p.invoice_ref == "PO-1001"

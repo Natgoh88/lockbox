@@ -5,3 +5,4 @@ __pycache__/
 data/state.json
 data/events.jsonl
 *.log
+data/payees.json

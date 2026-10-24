@@ -43,7 +43,10 @@ def make():
         s.approve_payee(Wallet.create().address, cap_drops=xrp_to_drops(100), invoice_ref=SUPPLIER_INVOICE)
         return s
     from lockbox import devnet
-    return devnet.build(INTERVAL)
+    from lockbox.chain import apply_payees
+    s = devnet.build(INTERVAL)
+    apply_payees(s)  # suppliers approved before the loan (scripts/07_fresh_lockbox.py)
+    return s
 
 
 def sc():
