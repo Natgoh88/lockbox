@@ -18,6 +18,9 @@ from .underwrite import annuity_payment
 from .units import RATE_UNITS, period_rate, ripple_to_unix, unix_to_ripple
 
 ASF_DISABLE_MASTER = 4
+LEDGER_SECONDS = 4  # a new ledger closes every few seconds on XRPL
+FIRST_LEDGER = 1_000
+SIM_LAST_LEDGER_OFFSET = 10  # prepare() fills LastLedgerSequence this far ahead, the referee's maximum
 
 
 @dataclass
@@ -26,6 +29,7 @@ class Account:
     signers: dict[str, int] = field(default_factory=dict)
     quorum: int = 0
     master_disabled: bool = False
+    sequence: int = 1
 
 
 @dataclass
@@ -52,6 +56,7 @@ class SimLoan:
 class SimChain:
     def __init__(self, start: int = 1_800_000_000, reserve: int = 2_000_000):
         self.t = start
+        self._start = start
         self._reserve = reserve
         self.accounts: dict[str, Account] = {}
         self.vaults: dict[str, dict] = {}
@@ -66,6 +71,13 @@ class SimChain:
 
     def advance(self, seconds: int) -> None:
         self.t += int(seconds)
+
+    def ledger_index(self) -> int:
+        """The current open ledger. Moves with time: one ledger every LEDGER_SECONDS."""
+        return FIRST_LEDGER + (self.t - self._start) // LEDGER_SECONDS
+
+    def next_sequence(self, addr: str) -> int:
+        return self.accounts.get(addr, Account()).sequence
 
     def fund(self, addr: str, drops: int) -> None:
         self.accounts.setdefault(addr, Account()).balance += drops
@@ -86,6 +98,8 @@ class SimChain:
     def prepare(self, tx: dict, signers_count: int = 0) -> dict:
         out = dict(tx)
         out.setdefault("Fee", str(10 * (1 + signers_count)))
+        out.setdefault("Sequence", self.next_sequence(out["Account"]))
+        out.setdefault("LastLedgerSequence", self.ledger_index() + SIM_LAST_LEDGER_OFFSET)
         return out
 
     def loan_view(self, loan_id: str) -> LoanView | None:
@@ -132,7 +146,9 @@ class SimChain:
         meta = {"TransactionResult": code}
         if meta_extra:
             meta.update(meta_extra)
-        entry = {"tx": {**tx, "date": unix_to_ripple(self.t), "hash": h}, "meta": meta, "validated": True, "hash": h}
+        meta.setdefault("TransactionIndex", self._n)
+        entry = {"tx": {**tx, "date": unix_to_ripple(self.t), "hash": h}, "meta": meta, "validated": True, "hash": h,
+                 "ledger_index": self.ledger_index()}
         for p in {tx.get("Account"), tx.get("Destination"), tx.get("Counterparty"), *(parties or [])}:
             if p:
                 self.history.setdefault(p, []).append(entry)
@@ -152,6 +168,14 @@ class SimChain:
         acct = tx["Account"]
         if acct not in self.accounts:
             return self._log(tx, "terNO_ACCOUNT")
+        if "LastLedgerSequence" in tx and self.ledger_index() > int(tx["LastLedgerSequence"]):
+            return self._log(tx, "tefMAX_LEDGER")
+        if "Sequence" in tx:
+            want = self.accounts[acct].sequence
+            if int(tx["Sequence"]) < want:
+                return self._log(tx, "tefPAST_SEQ")
+            if int(tx["Sequence"]) > want:
+                return self._log(tx, "terPRE_SEQ")
         if ttype == "LoanSet":
             if acct not in addrs or self._authorized(acct, {acct}) is not None:
                 return self._log(tx, "tefBAD_AUTH")
@@ -169,6 +193,8 @@ class SimChain:
             return self._log(tx, "terINSUF_FEE_B")
         before = {a: x.balance for a, x in self.accounts.items()}
         r = fn(tx)
+        if r.code.startswith(("tes", "tec")):  # applied to the ledger: the sequence is used up
+            self.accounts[acct].sequence += 1
         nodes = r.meta.setdefault("AffectedNodes", [])
         for a, x in self.accounts.items():
             if x.balance != before.get(a, 0):

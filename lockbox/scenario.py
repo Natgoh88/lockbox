@@ -157,5 +157,7 @@ class Scenario:
             "recovery_remaining": self.policy.recovery_remaining,
             "buckets": ctx.buckets.to_dict() if ctx.buckets else None,
             "frozen": covenant.frozen_reasons(ctx),
+            "ledger_index": self.policy.ledger_clock(),
+            "approval": self.policy.approval_state(self.lockbox).outstanding,
             "approved_payees": {a: {"cap_drops": p.cap_drops, "invoice_ref": p.invoice_ref} for a, p in self.params.approved_payees.items()},
         }

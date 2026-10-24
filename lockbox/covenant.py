@@ -21,6 +21,10 @@ Borrower payments freeze on ledger facts only: an installment is past due, or re
 the installment for two whole intervals in a row. The lender's impaired flag does NOT freeze anything,
 so a lender cannot use it to squeeze a healthy borrower.
 
+Approval hygiene: the referee only signs a transaction whose LastLedgerSequence is at most
+APPROVAL_WINDOW ledgers ahead, whose Sequence is the account's next one, and only while it has
+no other approval outstanding. A signature cannot be saved up and used later, or stacked.
+
 The XRP fee reserve is never spent: free cash and principal are measured after the account reserve
 and the fee buffer, and a LoanPay must leave the account reserve plus one more fee.
 
@@ -39,6 +43,7 @@ TF_FULLY_CANONICAL = 0x80000000
 TF_PARTIAL_PAYMENT = 0x00020000
 FORBIDDEN_FIELDS = ("Paths", "SendMax", "DeliverMin", "DeliverMax", "Sponsor", "Delegate", "RegularKey")
 LOANSET_BANNED_FEES = ("LatePaymentFee", "ClosePaymentFee", "OverpaymentFee")
+APPROVAL_WINDOW = 10  # ledgers, roughly 40 seconds
 
 
 @dataclass
@@ -77,6 +82,15 @@ class AcceptedTerms:
 
 
 @dataclass
+class ApprovalState:
+    """What the referee knows about the ledger clock and its own outstanding signature."""
+    ledger_index: int | None  # the current open ledger; None means the backend cannot say, so nothing is signed
+    next_sequence: int | None  # the next Sequence of the transaction's Account
+    outstanding: dict | None = None  # {"account", "sequence", "last_ledger"} of the approval not yet validated or expired
+    window: int = APPROVAL_WINDOW
+
+
+@dataclass
 class CovenantContext:
     lockbox: str
     lender: str
@@ -95,6 +109,7 @@ class CovenantContext:
     freeze_after_short_intervals: int = 2
     approved_payees: dict[str, Payee] = field(default_factory=dict)
     buckets: Buckets | None = None  # rebuilt from history by the caller; without it every drop counts as earned
+    approval: ApprovalState | None = None  # the referee always sets this; pure rule checks may leave it out
 
 
 @dataclass
@@ -196,6 +211,22 @@ def _not_frozen(add, ctx: CovenantContext) -> None:
         add("not_in_default", False, "the loan defaulted and recovery is still pending")
 
 
+def _approval_checks(add, tx: dict, a: ApprovalState) -> None:
+    lls = tx.get("LastLedgerSequence")
+    if a.ledger_index is None:
+        add("last_ledger_window", False, "the ledger index is unknown, so freshness cannot be checked")
+    else:
+        hi = a.ledger_index + a.window
+        add("last_ledger_window", isinstance(lls, int) and a.ledger_index <= lls <= hi,
+            f"LastLedgerSequence {lls}, must be between {a.ledger_index} and {hi}")
+    seq = tx.get("Sequence")
+    add("sequence_is_next", a.next_sequence is not None and "TicketSequence" not in tx and seq == a.next_sequence,
+        f"Sequence {seq}, the account's next is {a.next_sequence} (tickets are not accepted)")
+    o = a.outstanding
+    add("one_approval_at_a_time", o is None,
+        "" if o is None else f"already signed sequence {o['sequence']} for {o['account']}, valid until ledger {o['last_ledger']}")
+
+
 def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
     checks: list[Check] = []
 
@@ -217,6 +248,8 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
     add("fee_cap", _is_drops(fee) and int(fee) <= ctx.max_fee_drops, f"fee {fee}, cap {ctx.max_fee_drops}")
     present = [f for f in FORBIDDEN_FIELDS if f in tx]
     add("no_forbidden_fields", not present, ", ".join(present))
+    if ctx.approval is not None:
+        _approval_checks(add, tx, ctx.approval)
 
     if ttype == "LoanSet":
         a = ctx.accepted

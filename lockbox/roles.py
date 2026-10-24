@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from . import buckets, covenant, events, health, protocol as P
 from .backend import Backend, Result, addr_of
 from .buckets import Payee
-from .covenant import AcceptedTerms, CovenantContext, LoanView, Verdict
+from .covenant import AcceptedTerms, ApprovalState, CovenantContext, LoanView, Verdict
 from .underwrite import Offer
 
 
@@ -50,6 +50,7 @@ class PolicyService:
         self.owed_at_default: int | None = None
         self.recovered = 0
         self.last_verdict: Verdict | None = None
+        self.outstanding: dict | None = None  # the one approval the referee has handed out and not yet seen settle
 
     @property
     def address(self) -> str:
@@ -67,7 +68,30 @@ class PolicyService:
     def recovery_remaining(self) -> int:
         return 0 if self.owed_at_default is None else max(0, self.owed_at_default - self.recovered)
 
-    def context(self) -> CovenantContext:
+    def ledger_clock(self) -> int | None:
+        try:
+            return self.b.ledger_index()
+        except (AttributeError, NotImplementedError):
+            return None
+
+    def approval_state(self, account: str) -> ApprovalState:
+        """Clears the outstanding approval once the ledger shows it validated (sequence moved on) or expired."""
+        ledger = self.ledger_clock()
+        o = self.outstanding
+        if o is not None and ledger is not None:
+            try:
+                done = self.b.next_sequence(o["account"]) > o["sequence"]
+            except (AttributeError, NotImplementedError):
+                done = False
+            if done or ledger > o["last_ledger"]:
+                self.outstanding = o = None
+        try:
+            seq = self.b.next_sequence(account) if ledger is not None else None
+        except (AttributeError, NotImplementedError):
+            seq = None
+        return ApprovalState(ledger_index=ledger, next_sequence=seq, outstanding=o)
+
+    def context(self, tx: dict | None = None) -> CovenantContext:
         loan: LoanView | None = self.b.loan_view(self.loan_id) if self.loan_id else None
         if loan is not None:
             if loan.active:
@@ -86,10 +110,11 @@ class PolicyService:
             fee_buffer_drops=p.fee_buffer_drops, pay_allowance_drops=p.pay_allowance_drops, reserve_installments=p.reserve_installments,
             approved_payees=dict(p.approved_payees), buckets=bk, holdback_bps=p.holdback_bps,
             freeze_after_short_intervals=p.freeze_after_short_intervals,
+            approval=self.approval_state(tx.get("Account", self.lockbox)) if tx is not None else None,
         )
 
     def review(self, tx: dict) -> Verdict:
-        v = covenant.evaluate(tx, self.context())
+        v = covenant.evaluate(tx, self.context(tx))
         events.emit("verdict", ts=self.b.now(), tx=tx.get("TransactionType"), allowed=v.allowed, reason=v.reason,
                     amount=tx.get("Amount") or tx.get("PrincipalRequested"), free_cash=v.free_cash,
                     to=tx.get("Destination"), checks=[{"name": c.name, "ok": c.ok, "detail": c.detail} for c in v.checks])
@@ -100,6 +125,8 @@ class PolicyService:
         v = self.last_verdict = self.review(tx)
         if not v.allowed:
             raise Refused(v)
+        self.outstanding = {"account": tx["Account"], "sequence": tx["Sequence"], "last_ledger": tx["LastLedgerSequence"]}
+        events.emit("approval", ts=self.b.now(), tx=tx.get("TransactionType"), **self.outstanding)
         return self.key
 
     def observe(self, tx: dict, result: Result) -> None:
