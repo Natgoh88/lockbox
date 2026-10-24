@@ -74,10 +74,10 @@ class XrplChain:
         return self.c.request(AccountInfo(account=addr, ledger_index="validated", **kw)).result
 
     def balance(self, addr: str) -> int:
-        try:
-            return int(self._info(addr)["account_data"]["Balance"])
-        except Exception:
+        info = self._info(addr)
+        if info.get("error") == "actNotFound":  # not funded yet; anything else is a real error
             return 0
+        return int(info["account_data"]["Balance"])
 
     def reserve(self, addr: str) -> int:
         led = self.c.request(ServerInfo()).result["info"]["validated_ledger"]
