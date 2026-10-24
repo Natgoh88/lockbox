@@ -34,7 +34,8 @@ class Params:
     reserve_installments: int = 1  # holdback: whole installments kept back
     holdback_bps: int = 0  # holdback: share of each revenue payment kept back while a loan is open (basis points)
     freeze_after_short_intervals: int = 2
-    pay_lead_fraction: float = 0.25  # collect when this close to the due date (fraction of the interval)
+    pay_lead_fraction: float = 0.5  # collect when this close to the due date (fraction of the interval). 0.25 (30 s) was too
+    # late on Devnet: the LoanPay validated after the due date and failed with tecEXPIRED
     release_key: str = ""  # the borrower's registered key; the account goes back to it after full repayment
 
     def rulebook(self) -> dict:
