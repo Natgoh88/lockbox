@@ -1,0 +1,13 @@
+[project]
+name = "lockbox-auditor"
+version = "0.1.0"
+description = "Read-only agent that explains what a Lockbox referee did, from the public XRPL Devnet ledger"
+requires-python = ">=3.12"
+dependencies = [
+    "bedrock-agentcore",
+    "strands-agents",
+    "xrpl-py>=5.2",
+]
+
+[dependency-groups]
+dev = ["pytest"]

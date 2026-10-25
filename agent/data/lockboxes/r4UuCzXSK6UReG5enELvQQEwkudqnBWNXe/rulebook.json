@@ -1,0 +1,37 @@
+{
+  "name": "lending-covenant",
+  "version": 1,
+  "fingerprint": "4F1934812BE51C9281D1623C1C670F244277B5B96A71C99170F8B3E613737101",
+  "config": {
+    "max_fee_drops": 1000,
+    "fee_buffer_drops": 5000,
+    "pay_allowance_drops": 10000,
+    "reserve_installments": 1,
+    "holdback_bps": 0,
+    "freeze_after_short_intervals": 2,
+    "approval_window": 10,
+    "signer_weights": {
+      "referee": 2,
+      "borrower": 1,
+      "lender": 1
+    },
+    "quorum": 3
+  },
+  "approved_suppliers": {
+    "rPW1wZxZqCAMpWnGgucCgF2kknibzFSteJ": {
+      "cap_drops": 20000000,
+      "invoice_ref": "PO-1001"
+    }
+  },
+  "terms": {
+    "broker_id": "9FADEE49B3A94ECE8F98324EA9188DC0200FB5F4D3184328191FEEBCD12BAD81",
+    "principal": 13087951,
+    "interest_rate_units": 8000,
+    "payment_total": 6,
+    "payment_interval": 120,
+    "grace_period": 120,
+    "origination_fee": 0,
+    "service_fee": 50000
+  },
+  "agreement_hash": "1DEB659EC0D1AEED0D3FAF1685F704ADFFE89B8D2D15914BEAB9801826190446"
+}
