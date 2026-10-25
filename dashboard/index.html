@@ -108,6 +108,12 @@
   .quote { border:1px solid var(--line); border-radius:4px; padding:14px 16px; }
   .quote .num { font-size:44px; }
   .quote.ours { border:2px solid var(--ink); }
+  .quote .pair { gap:12px 20px; margin-top:6px; }
+  .real-title { font-size:20px; font-weight:800; margin:26px 0 0; }
+  table.real { margin-top:10px; }
+  table.real td.n, table.real th:not(:first-child) { text-align:right; }
+  table.real td.n { font-family:var(--mono); font-size:16px; white-space:nowrap; }
+  table.real tr.save td { font-weight:800; font-size:18px; border-bottom:none; }
   .kv { display:grid; grid-template-columns:minmax(150px, auto) 1fr; gap:8px 18px; font-size:16px; align-content:start; }
   .kv dt { color:var(--mute); } .kv dd { margin:0; font-weight:500; }
   .kv dd.bad { color:var(--bad); }
@@ -371,7 +377,8 @@ function render() {
       <div class="dots">${dots}</div>
       <div class="lab">${paid} of ${total} installments paid</div>
       <div class="pair" style="margin-top:18px"><div class="stat"><span class="lab">Installment</span><b>${amt(L.installment)}</b></div>
-      <div class="stat"><span class="lab">${right[0]}</span><b>${right[1]}</b></div></div>`;
+      <div class="stat"><span class="lab">${right[0]}</span><b>${right[1]}</b></div></div>
+      ${o && o.payment_total && o.payment_interval ? `<div class="fine">Demo loan: interest is close to zero because it lasts ${Math.round(o.payment_total * o.payment_interval / 60)} minutes. The ${amt(o.service_fee || 0)} per installment is the service fee.</div>` : ''}`;
   }
 
   // lender side
@@ -441,6 +448,44 @@ function reasonRow(r, o) {
   return i > 0 ? [esc(r.slice(0, i)), esc(r.slice(i + 2))] : ['Note', esc(r)];
 }
 
+function quoteBox(title, ok, drops, rate, ours) {
+  return `<div class="quote${ours ? ' ours' : ''}"><div class="lab">${title}</div>${ok
+    ? `<div class="pair"><div><div class="lab">Can borrow up to</div><div class="num tight">${xrp(drops)}<small>XRP</small></div></div>
+       <div><div class="lab">Rate</div><div class="num tight">${(rate || 0).toFixed(1)}<small>% a year</small></div></div></div>`
+    : '<div class="num tight">declined</div>'}</div>`;
+}
+function unlockedLine(o, u) {
+  const f = o.principal ? (u.principal_drops || 0) / o.principal : 0;
+  const share = Math.abs(f - 0.5) < 0.001 ? 'half' : `${Math.round(f * 100)}% of`;
+  const pts = ((u.rate_pct || 0) - (o.rate_pct || 0)).toFixed(1).replace(/\.0$/, '');
+  return `Without a lockbox the lender can't stop money leaving, so they lend less and charge more. Our assumptions: ${share} the limit, +${pts} points.`;
+}
+// a level-payment loan: monthly rate = annual / 12
+function amortize(principal, annualPct, n) {
+  const r = annualPct / 100 / 12;
+  const pay = r ? principal * r / (1 - Math.pow(1 + r, -n)) : principal / n;
+  return {pay, interest: pay * n - principal};
+}
+// the same quote at a human scale: one interval read as one month, 1 XRP read as $1,000
+function realLife(o, u) {
+  if (!o.approved || !u.approved || !o.payment_total) return '';
+  const usd = x => '$' + Math.round(x).toLocaleString('en-US');
+  const n = o.payment_total, ours = o.principal / 1e6 * 1000, theirs = u.principal_drops / 1e6 * 1000;
+  const a = amortize(theirs, o.rate_pct, n), b = amortize(theirs, u.rate_pct, n);
+  const save = b.interest - a.interest, savePct = b.interest ? Math.round(save / b.interest * 100) : 0;
+  const iv = ivWord(o.payment_interval || (S && S.interval) || 0);
+  return `<h3 class="real-title">Same business in real life</h3>
+    <div class="fine" style="margin-top:2px">Illustration: each ${iv} interval read as one month, 1 XRP read as $1,000. Not real money or market data.</div>
+    <table class="real">
+      <tr><th></th><th>With Lockbox</th><th>Without Lockbox</th></tr>
+      <tr><td>Can borrow up to</td><td class="n">${usd(ours)}</td><td class="n">${usd(theirs)}</td></tr>
+      <tr><td>Rate</td><td class="n">${o.rate_pct.toFixed(1)}%</td><td class="n">${u.rate_pct.toFixed(1)}%</td></tr>
+      <tr><td>Monthly payment on the Lockbox loan</td><td class="n">${usd(amortize(ours, o.rate_pct, n).pay)}</td><td class="n mute">-</td></tr>
+      <tr><td>Interest on the same ${usd(theirs)} over ${n} months</td><td class="n">${usd(a.interest)}</td><td class="n">${usd(b.interest)}</td></tr>
+      <tr class="save"><td colspan="3">You save ${usd(save)} (${savePct}% less interest)</td></tr>
+    </table>`;
+}
+
 function renderOffer(o) {
   if (!o) { $('uw-line').textContent = 'Underwriting: no quote yet'; $('offer').innerHTML = ''; return; }
   const u = o.unlocked || {};
@@ -459,11 +504,9 @@ function renderOffer(o) {
     <div>
       <div class="lab" style="margin-bottom:8px">Buyer payments per interval, oldest to newest</div>
       <div class="hist">${o.buckets.map(v => `<i style="height:${Math.max(2, v / mx * 100)}%" title="${amt(v)}"></i>`).join('')}</div>
-      <div class="quotes">
-        <div class="quote ours"><div class="lab">With Lockbox</div>${o.approved ? `<div class="num tight">${xrp(o.principal)}<small>XRP</small></div><div class="lab">${pct(o.rate_pct)} a year, installment ${amt(o.installment)}</div>` : '<div class="num tight">declined</div>'}</div>
-        <div class="quote"><div class="lab">Without Lockbox</div>${u.approved ? `<div class="num tight">${xrp(u.principal_drops)}<small>XRP</small></div><div class="lab">${pct(u.rate_pct)} a year, installment ${amt(u.installment_drops)}</div>` : '<div class="num tight">declined</div>'}
-          <div class="fine" style="margin-top:10px">Our assumptions, not market data: without the lockbox the lender can't stop money leaving, so ${((u.rate_pct || 0) - (o.rate_pct || 0)).toFixed(0)} points more and ${o.principal ? Math.round((u.principal_drops || 0) / o.principal * 100) : 0}% of the limit.</div></div>
-      </div>
+      <div class="quotes">${quoteBox('With Lockbox', o.approved, o.principal, o.rate_pct, true)}${quoteBox('Without Lockbox', u.approved, u.principal_drops, u.rate_pct, false)}</div>
+      <div class="fine">${unlockedLine(o, u)}</div>
+      ${realLife(o, u)}
     </div>
     <dl class="kv">${list.map(([k, v, cls]) => `<dt class="${cls || ''}">${k}</dt><dd class="${cls || ''}">${v}</dd>`).join('')}</dl>
   </div>`;
