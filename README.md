@@ -172,6 +172,7 @@ curl -X POST localhost:8080/invocations -H "Content-Type: application/json" \
   -d '{"prompt": "Why was the payment refused on r4UuCzXSK6UReG5enELvQQEwkudqnBWNXe?"}'
 
 .venv/bin/python -m pytest tests     # 16 tests, no network (recorded Devnet answers)
+./demo.sh                            # one question and answer, for a 30-second screen recording
 ```
 
 ### Build, with the secret check
