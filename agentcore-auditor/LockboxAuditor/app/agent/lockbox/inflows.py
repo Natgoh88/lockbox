@@ -1,0 +1,99 @@
+"""Turn raw account_tx history into a clean list of incoming XRP payments.
+
+Only evidence we can defend is kept: validated, successful Payments to the account, XRP only,
+measured by what was DELIVERED (not what the Amount field says), excluding self payments,
+the payment that created the account (an opening deposit, often a faucet, is not revenue) and
+any sender we are told to ignore (for example the vault paying out loan principal).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from .units import ripple_to_unix
+
+
+@dataclass(frozen=True)
+class Inflow:
+    ts: int  # unix seconds
+    drops: int
+    sender: str
+    tx_hash: str = ""
+
+
+def _close_time(entry: dict, tx: dict) -> int | None:
+    date = tx.get("date", entry.get("date"))
+    if date is not None:
+        return ripple_to_unix(int(date))
+    iso = entry.get("close_time_iso")
+    if iso:
+        return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp())
+    return None
+
+
+def created_account(meta: dict, account: str) -> bool:
+    """True if this transaction created the account's AccountRoot (its opening deposit)."""
+    for n in meta.get("AffectedNodes", []):
+        c = n.get("CreatedNode", {})
+        if c.get("LedgerEntryType") == "AccountRoot" and c.get("NewFields", {}).get("Account") == account:
+            return True
+    return False
+
+
+def funded_by(entries: list[dict], account: str, own: set[str]) -> bool:
+    """True if any of the `own` wallets ever paid XRP into `account` (created it or topped it up), read from the
+    account's own account_tx. Revenue from such a sender is the borrower's money going round in a circle."""
+    for e in entries:
+        tx = e.get("tx_json") or e.get("tx") or {}
+        meta = e.get("meta") or e.get("metaData") or {}
+        if not e.get("validated", True) or meta.get("TransactionResult") != "tesSUCCESS":
+            continue
+        if tx.get("TransactionType") == "Payment" and tx.get("Destination") == account and tx.get("Account") in own:
+            return True
+    return False
+
+
+def repaid_loans(entries: list[dict], account: str, loan_view) -> int:
+    """How many loans this account borrowed (successful LoanSet with it as Counterparty) and fully repaid.
+    loan_view(loan_id) reads the Loan object: repaid means no payments remaining and not defaulted. A loan
+    that cannot be read is not counted (check on Devnet whether repaid loans stay readable)."""
+    n = 0
+    for e in entries:
+        tx = e.get("tx_json") or e.get("tx") or {}
+        meta = e.get("meta") or e.get("metaData") or {}
+        if not e.get("validated", True) or meta.get("TransactionResult") != "tesSUCCESS":
+            continue
+        if tx.get("TransactionType") != "LoanSet" or tx.get("Counterparty") != account:
+            continue
+        for node in meta.get("AffectedNodes", []):
+            c = node.get("CreatedNode", {})
+            if c.get("LedgerEntryType") == "Loan":
+                ln = loan_view(c.get("LedgerIndex"))
+                if ln is not None and ln.payment_remaining <= 0 and not ln.defaulted:
+                    n += 1
+    return n
+
+
+def parse_account_tx(entries: list[dict], account: str, ignore_senders: set[str] | None = None) -> list[Inflow]:
+    """entries = result["transactions"] from an account_tx call (API v1 or v2 shape)."""
+    ignore = ignore_senders or set()
+    out: list[Inflow] = []
+    for e in entries:
+        tx = e.get("tx_json") or e.get("tx") or {}
+        meta = e.get("meta") or e.get("metaData") or {}
+        if not e.get("validated", True):
+            continue
+        if tx.get("TransactionType") != "Payment" or tx.get("Destination") != account:
+            continue
+        if tx.get("Account") == account or tx.get("Account") in ignore:
+            continue
+        if meta.get("TransactionResult") != "tesSUCCESS" or created_account(meta, account):
+            continue
+        delivered = meta.get("delivered_amount", meta.get("DeliveredAmount"))
+        if not isinstance(delivered, str) or not delivered.isdigit():
+            continue  # IOU or unavailable: not counted in this XRP-only version
+        ts = _close_time(e, tx)
+        if ts is None:
+            continue
+        out.append(Inflow(ts=ts, drops=int(delivered), sender=tx["Account"], tx_hash=e.get("hash") or tx.get("hash", "")))
+    return sorted(out, key=lambda i: i.ts)
