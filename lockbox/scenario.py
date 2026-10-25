@@ -233,7 +233,7 @@ class Scenario:
                                               "installment": o.installment_drops, "rate_units": o.interest_rate_units, "payment_total": o.payment_total, "reasons": o.reasons,
                                               "declines": o.declines, "buckets": o.metrics.buckets,
                                               "rate_pct": o.rate_pct, "unlocked": o.unlocked, "stress": o.stress,
-                                              "graduation": o.graduation},
+                                              "graduation": o.graduation, "service_fee": o.service_fee_drops, "payment_interval": o.payment_interval},
             "recovery_remaining": self.policy.recovery_remaining,
             "buckets": ctx.buckets.to_dict() if ctx.buckets else None,
             "frozen": covenant.frozen_reasons(ctx),

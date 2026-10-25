@@ -42,3 +42,9 @@ def test_state_shows_the_stress_line(sc):
     sc.quote()
     st = sc.state()["offer"]["stress"]
     assert st["revenue_drop_pct"] == 30 and st["still_covered"]
+
+
+def test_state_offer_has_the_service_fee_and_interval(sc):
+    o = sc.quote()
+    st = sc.state()["offer"]
+    assert st["service_fee"] == o.service_fee_drops == 50_000 and st["payment_interval"] == o.payment_interval == 120
