@@ -182,7 +182,10 @@ class PolicyService:
         return self.key
 
     def observe(self, tx: dict, result: Result) -> None:
-        """Called after a submit so recovery accounting follows what actually happened."""
+        """Called after a submit so recovery accounting follows what actually happened. Also logs which ledger
+        transaction the referee's approval became, so a decision can link to it."""
+        events.emit("submitted", ts=self.b.now(), account=tx.get("Account"), sequence=tx.get("Sequence"), hash=result.hash,
+                    ok=result.ok, code=result.code)
         if result.ok and tx.get("TransactionType") == "Payment" and tx.get("Destination") == self.lender:
             self.recovered += int(tx["Amount"])
 
@@ -334,6 +337,7 @@ class Servicer:
         policy_key = self.policy.cosign(tx)
         borrower_key = borrower.cosign_loan(tx)
         r = self.b.submit(tx, [self.key], counterparty_signers=[borrower_key, policy_key])
+        self.policy.observe(tx, r)
         events.emit("loan_set", ts=self.b.now(), ok=r.ok, code=r.code, principal=offer.principal_drops)
         if r.ok:
             self.loan_id = r.created.get("Loan")
