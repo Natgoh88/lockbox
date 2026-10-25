@@ -185,17 +185,30 @@ def measure(inflows: list[Inflow], now: int, p: Policy) -> Metrics:
 
 def score(m: Metrics, p: Policy) -> tuple[int, list[str]]:
     """0 to 100. Four parts, each explained."""
-    notes: list[str] = []
     depth = 25 * min(1.0, m.history_buckets / p.lookback_buckets)
-    notes.append(f"history {m.history_buckets} of {p.lookback_buckets} intervals: {depth:.0f}/25")
     stability = 35 * (1 - min(1.0, m.cv))
-    notes.append(f"inflow volatility (std/mean) {m.cv:.2f}: {stability:.0f}/35")
     spread = 20 * (1 - m.top_sender_share) / (1 - 1 / max(m.senders, 2)) if m.senders > 1 else 0.0
     spread = min(20.0, spread)
-    notes.append(f"{m.senders} paying sender(s), largest share {m.top_sender_share:.0%}: {spread:.0f}/20")
     recency = 20 * min(1.0, m.recent_ratio)
-    notes.append(f"last interval at {m.recent_ratio:.0%} of the average: {recency:.0f}/20")
-    return int(round(depth + stability + spread + recency)), notes
+    total = int(round(depth + stability + spread + recency))
+    d, s, sp, r = shown_points([depth, stability, spread, recency], total)
+    notes = [
+        f"history {m.history_buckets} of {p.lookback_buckets} intervals: {d}/25",
+        f"inflow volatility (std/mean) {m.cv:.2f}: {s}/35",
+        f"{m.senders} paying sender(s), largest share {m.top_sender_share:.0%}: {sp}/20",
+        f"last interval at {m.recent_ratio:.0%} of the average: {r}/20",
+    ]
+    return total, notes
+
+
+def shown_points(parts: list[float], total: int) -> list[int]:
+    """Whole points for display that add up to the score (largest remainder). Rounding each part on its own
+    could show 15+23+15+20 = 73 next to a score of 72. The score itself is unchanged."""
+    out = [int(x) for x in parts]
+    order = sorted(range(len(parts)), key=lambda i: parts[i] - out[i], reverse=True)
+    for i in order[:max(0, total - sum(out))]:
+        out[i] += 1
+    return out
 
 
 def tier_for(s: int) -> str:
