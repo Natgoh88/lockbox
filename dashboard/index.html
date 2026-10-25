@@ -155,7 +155,7 @@
     <div class="ref-head">
       <h2>The referee</h2>
       <span class="rb" id="rb"></span>
-      <button id="b-verify" class="pri" data-step="8">Verify the referee</button>
+      <button id="b-verify" class="pri" data-step="9">Verify the referee</button>
     </div>
     <div class="banner" id="banner"></div>
     <div class="ask-row" id="ask-row" style="display:none"><button id="b-why" title="An AI explains this decision. It never changes it.">Why?</button><div class="ask-out" id="ask-why"></div></div>
@@ -208,8 +208,8 @@
     <button id="b-sup" data-step="6">Pay supplier</button>
     <button id="b-free">Withdraw free cash</button>
     <button id="b-all" data-step="7">Withdraw all</button>
-    <button id="b-payoff">Repay in full</button>
-    <button id="b-release">Release account</button></div></div>
+    <button id="b-payoff" data-step="8">Repay in full</button>
+    <button id="b-release" data-step="8">Release account</button></div></div>
   <div class="grp"><span>Lender</span><div class="btns">
     <button id="b-quote" class="pri" data-step="3">Underwrite</button>
     <button id="b-borrow" class="pri" data-step="4">Make the loan</button></div></div>
@@ -351,6 +351,18 @@ const PARTS = [
 ];
 
 const FREEZE = ['not_in_default', 'loan_current', 'revenue_covers_installment'];
+// the owner tried to withdraw while frozen and the referee refused, since the latest loan
+function frozenRefused() {
+  const loanAt = (evs.filter(e => e.kind === 'loan_set').pop() || {i: Infinity}).i;
+  return evs.some(e => e.kind === 'verdict' && !isDry(e) && e.to === S.payout_address && !e.allowed && FREEZE.includes(e.rule) && e.i > loanAt);
+}
+// the referee's payoff rule: the full payoff must fit in the balance minus the ledger reserve, fee buffer and bond
+function canPayOff() {
+  const L = S.loan, bk = S.buckets || {};
+  if (!L || !L.owed) return false;
+  const fee = (S.offer && S.offer.service_fee) || 0;
+  return L.owed + fee <= S.lockbox.balance - (bk.reserve || 0) - (bk.fee_buffer || 0) - (bk.bond || 0);
+}
 // the next step of DEMO.md, highlighted on its button
 function nextStep() {
   if (!S || S.mode !== 'sim') return null;
@@ -363,11 +375,17 @@ function nextStep() {
   const loanAt = after('loan_set');
   const refusedOwn = evs.some(e => toOwner(e) && !e.allowed && e.i > loanAt);
   if (bk.unspent_principal > 0) return refusedOwn ? 'b-sup' : 'b-own';
+  // paid off early: hand the account back, then let anyone check the referee
+  if (S.status === 'paid') return Object.keys(lb.signers || {}).length ? 'b-release' : verified ? null : 'b-verify';
   if (S.status !== 'defaulted') {
     if (!['current', 'late', 'impaired', 'defaultable'].includes(S.status)) return null;
-    if (salesOn) return 'b-adv2';
-    const frozenRefusal = evs.some(e => toOwner(e) && !e.allowed && FREEZE.includes(e.rule) && e.i > loanAt);
-    return (S.frozen || []).length && !frozenRefusal ? 'b-all' : 'b-adv1';
+    const frozen = (S.frozen || []).length;
+    const frozenRefusal = frozenRefused();
+    // sales stop, the account freezes, withdrawing everything is refused
+    if (!frozenRefusal) return salesOn ? 'b-adv2' : frozen ? 'b-all' : 'b-adv1';
+    // sales come back, the freeze lifts, and once the cash covers it the borrower pays off early
+    if (!salesOn) return 'b-adv2';
+    return !frozen && canPayOff() ? 'b-payoff' : 'b-adv1';
   }
   return verified ? null : 'b-verify';
 }
@@ -386,10 +404,16 @@ function render() {
 
   // account
   $('bal').innerHTML = `${xrp(lb.balance)}<small>XRP</small>`;
-  const parts = PARTS.filter(p => (bk[p[0]] || 0) > 0);
-  const tot = Math.max(1, parts.reduce((a, p) => a + bk[p[0]], 0));
-  $('stack').innerHTML = parts.map(p => `<i style="width:${bk[p[0]] / tot * 100}%;background:${p[2]}" title="${p[1]}"></i>`).join('');
-  $('legend').innerHTML = parts.map(p => `<span class="sw" style="background:${p[2]}"></span><span>${p[1]}</span><span class="v">${amt(bk[p[0]])}</span>`).join('');
+  // the next installment is what must be set aside; when the balance falls short of it, show what is actually there
+  // (lockbox/buckets.py sets aside the ledger reserve and fee buffer first, so the shortfall lands on the installment)
+  const shortInst = Math.min(bk.installment_reserve || 0, bk.shortfall || 0);
+  const held = {...bk, installment_reserve: (bk.installment_reserve || 0) - shortInst};
+  const parts = PARTS.filter(p => (held[p[0]] || 0) > 0 || (p[0] === 'installment_reserve' && shortInst > 0));
+  const tot = Math.max(1, parts.reduce((a, p) => a + held[p[0]], 0));
+  const shown = p => p[0] === 'installment_reserve' && shortInst > 0
+    ? `${amt(bk.installment_reserve)} needed, ${amt(held.installment_reserve)} set aside` : amt(held[p[0]]);
+  $('stack').innerHTML = parts.map(p => `<i style="width:${held[p[0]] / tot * 100}%;background:${p[2]}" title="${p[1]}"></i>`).join('');
+  $('legend').innerHTML = parts.map(p => `<span class="sw" style="background:${p[2]}"></span><span>${p[1]}</span><span class="v">${shown(p)}</span>`).join('');
   const why = {past_due: 'a payment is past due', revenue_short: 'sales fell short of the installment two intervals in a row', in_default: 'the loan defaulted and the lender is still owed'};
   const fz = S.frozen || [];
   $('frozen-why').innerHTML = fz.length ? `<span style="color:var(--bad);font-weight:700">Withdrawals frozen:</span> ${fz.map(r => why[r] || r).join('; ')}.` : '';
@@ -456,6 +480,8 @@ function render() {
   const nx = nextStep();
   document.querySelectorAll('button.next').forEach(b => { if (b.id !== nx) b.classList.remove('next'); });
   if (nx && !$(nx).disabled) $(nx).classList.add('next');
+  // Advance and the sales switch are step 7 (the freeze) until the frozen withdrawal is refused, then step 8 (pay off, release)
+  $('b-adv1').dataset.step = $('b-adv2').dataset.step = frozenRefused() ? '8' : '7';
 }
 
 const when = t => { if (!t || !S) return '-'; const m = Math.round((t - S.now) / 60); return m > 0 ? `in ${m} min` : m < 0 ? `${-m} min ago` : 'now'; };
