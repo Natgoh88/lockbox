@@ -4,6 +4,7 @@
   python main.py --ask "question"     answer one question in the terminal
 
 The answer is written by an AI model that calls the three read-only tools:
+  ollama     an open model on Ollama Cloud, when OLLAMA_API_KEY is set (put it in agent/.env)
   anthropic  Claude through the Anthropic API, when ANTHROPIC_API_KEY is set (put it in agent/.env)
   bedrock    Claude through Amazon Bedrock, when AWS credentials are available (AgentCore Runtime)
   offline    no model: answer.py writes the same facts from a fixed template
@@ -79,6 +80,8 @@ def get_rulebook() -> dict:
 
 
 ANTHROPIC_MODEL = "claude-opus-5-5"
+OLLAMA_HOST = "https://ollama.com"
+OLLAMA_MODEL = "gpt-oss:120b"  # a cloud model with tool calling; names come from https://ollama.com/api/tags
 
 
 def load_env(path: Path = Path(__file__).resolve().parent / ".env") -> None:
@@ -97,10 +100,12 @@ def load_env(path: Path = Path(__file__).resolve().parent / ".env") -> None:
 
 
 def mode() -> str:
-    """anthropic, bedrock or offline. auto (the default) takes the first one that has credentials."""
+    """ollama, anthropic, bedrock or offline. auto (the default) takes the first one that has credentials."""
     m = os.environ.get("LOCKBOX_AUDITOR_MODE", "auto")
-    if m in ("anthropic", "bedrock", "offline"):
+    if m in ("ollama", "anthropic", "bedrock", "offline"):
         return m
+    if os.environ.get("OLLAMA_API_KEY"):
+        return "ollama"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic"
     try:
@@ -111,6 +116,11 @@ def mode() -> str:
 
 
 def build_model(m: str):
+    if m == "ollama":
+        from strands.models.ollama import OllamaModel
+        return OllamaModel(os.environ.get("LOCKBOX_OLLAMA_HOST", OLLAMA_HOST),
+                           ollama_client_args={"headers": {"Authorization": f"Bearer {os.environ['OLLAMA_API_KEY']}"}},
+                           model_id=os.environ.get("LOCKBOX_MODEL_ID", OLLAMA_MODEL))
     if m == "anthropic":
         from strands.models.anthropic import AnthropicModel
         # Claude Opus 5.5 thinks adaptively on its own (no thinking setting); effort is set explicitly

@@ -159,6 +159,7 @@ The ledger client can only call `account_info`, `account_tx`, `ledger_entry` and
 
 | Mode | When | Model |
 | --- | --- | --- |
+| `ollama` | `OLLAMA_API_KEY` is set (a free Ollama Cloud key from ollama.com, in `agent/.env`) | `gpt-oss:120b` on Ollama Cloud (`https://ollama.com`); any name from `https://ollama.com/api/tags` via `LOCKBOX_MODEL_ID` |
 | `anthropic` | `ANTHROPIC_API_KEY` is set (put it in `agent/.env`, which is gitignored; see `agent/.env.example`) | Claude Opus 5.5 (`claude-opus-5-5`) through the Anthropic API, effort `medium` |
 | `bedrock` | AWS credentials are available, as on AgentCore Runtime | Strands' default Bedrock model (Claude Sonnet 4.6, us-west-2) |
 | `offline` | neither | no model: `agent/answer.py` writes the same facts from a fixed template |
@@ -170,8 +171,8 @@ The ledger client can only call `account_info`, `account_tx`, `ledger_entry` and
 ```bash
 cd agent
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python bedrock-agentcore 'strands-agents[anthropic]' xrpl-py pytest
-cp .env.example .env                 # then paste your Anthropic API key into .env
+uv pip install --python .venv/bin/python bedrock-agentcore 'strands-agents[anthropic,ollama]' xrpl-py pytest
+cp .env.example .env                 # then paste your Ollama Cloud API key into .env
 
 .venv/bin/python main.py --ask "What did the referee do on lockbox rnC9yaPArTeyTijnNbhgGajUTd2WHr4CzG?"
 .venv/bin/python main.py --ask "Why was the payment refused on r4UuCzXSK6UReG5enELvQQEwkudqnBWNXe?"
@@ -180,7 +181,7 @@ cp .env.example .env                 # then paste your Anthropic API key into .e
 curl -X POST localhost:8080/invocations -H "Content-Type: application/json" \
   -d '{"prompt": "Why was the payment refused on r4UuCzXSK6UReG5enELvQQEwkudqnBWNXe?"}'
 
-.venv/bin/python -m pytest tests     # 20 tests, no network and no model calls
+.venv/bin/python -m pytest tests     # 21 tests, no network and no model calls
 ./demo.sh                            # one question and answer, for a 30-second screen recording
 ```
 

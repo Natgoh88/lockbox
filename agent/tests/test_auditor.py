@@ -124,8 +124,22 @@ def test_strands_agent_has_the_three_read_only_tools():
 FAKE_ANTHROPIC_KEY = "sk-" + "ant-" + "test0000000000000000000000000000"
 
 
+def test_ollama_cloud_model_is_wired_with_the_key_as_a_bearer_header(monkeypatch):
+    import main
+    from strands.models.ollama import OllamaModel
+    monkeypatch.setenv("LOCKBOX_AUDITOR_MODE", "auto")
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-ollama-key")
+    monkeypatch.delenv("LOCKBOX_MODEL_ID", raising=False)
+    assert main.mode() == "ollama"
+    m = main.build_model("ollama")
+    assert isinstance(m, OllamaModel) and m.get_config()["model_id"] == "gpt-oss:120b"
+    assert m.host == "https://ollama.com"
+    assert m.client_args["headers"]["Authorization"] == "Bearer test-ollama-key"
+
+
 def test_mode_prefers_anthropic_when_a_key_is_set(monkeypatch):
     import main
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
     monkeypatch.setenv("LOCKBOX_AUDITOR_MODE", "auto")
     monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_ANTHROPIC_KEY)
     assert main.mode() == "anthropic"
