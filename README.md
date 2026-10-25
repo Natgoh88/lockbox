@@ -217,6 +217,8 @@ cd agentcore-auditor/LockboxAuditor
 agentcore status
 agentcore invoke --runtime agent --payload '{"prompt":"Explain what the referee did on the Lockbox account rnC9yaPArTeyTijnNbhgGajUTd2WHr4CzG from DEVNET.md, and whether every decision matched the rulebook."}'
 agentcore logs runtime
+# or, plain text only (good for a screen recording), from the repo root:
+./agentcore-auditor/ask.sh
 ```
 
 It answers in about 30 seconds: 12 referee decisions, all signed and none refused (the loan, 7 repayments of which the ledger rejected one as `tecEXPIRED` and took two late, a withdrawal of the owner's own money, a supplier payment with invoice PO-1001, and the release), the rulebook fingerprint matching the one on the ledger, and every decision replaying the same.
