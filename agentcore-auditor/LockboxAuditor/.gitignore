@@ -17,3 +17,7 @@ agentcore/.cli/*
 
 # CDK
 agentcore/cdk/cdk.out/
+
+# Lockbox: keep account IDs and deployment ARNs out of the public repo (local only)
+agentcore/.cli/
+agentcore/.cache/

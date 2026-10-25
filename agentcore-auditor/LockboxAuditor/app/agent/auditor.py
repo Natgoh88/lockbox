@@ -35,6 +35,7 @@ EXTRA_RULE_TEXT = {
     "invoice_memo": "a supplier payment must carry the approved invoice number",
     "within_payee_cap": "a supplier can be paid only up to the amount the lender approved",
 }
+LOAN_MANAGE_ACTIONS = {0x00010000: "default the loan", 0x00020000: "mark the loan impaired (late)", 0x00040000: "clear the impaired mark"}
 TX_TYPES = ("Payment", "LoanPay", "LoanSet", "LoanManage", "SetRegularKey", "SignerListSet", "AccountSet")
 LATE_FLAG = 0x00040000
 
@@ -139,6 +140,11 @@ def _memos(tx: dict) -> list[str]:
     return out
 
 
+def _loan_manage_action(tx: dict) -> str:
+    flags = int(tx.get("Flags", 0))
+    return next((v for k, v in LOAN_MANAGE_ACTIONS.items() if flags & k), "unknown")
+
+
 def _signers(tx: dict) -> list[str]:
     if tx.get("TransactionType") == "LoanSet":
         cs = tx.get("CounterpartySignature", {}).get("Signers", [])
@@ -194,6 +200,7 @@ def get_account_history(address: str, limit: int = 60, src=DEVNET) -> dict:
             "to": f"{roles.get(dest, 'unknown')} {dest}" if dest else None,
             "memos": _memos(tx),
             "late_payment_flag": bool(int(tx.get("Flags", 0)) & LATE_FLAG) if tx.get("TransactionType") == "LoanPay" else None,
+            "loan_manage_action": _loan_manage_action(tx) if tx.get("TransactionType") == "LoanManage" else None,
             "signed_by": [f"{roles.get(a, 'unknown')} {a}" for a in _signers(tx)],
             "explorer": src.explorer(h),
         })
@@ -238,11 +245,12 @@ def verify_lockbox(address: str, src=DEVNET) -> dict:
     # next payment that was sent, so match on the whole payment, not just the sequence
     for e in history:
         tx = _tx(e)
-        on_ledger.setdefault(_key(tx), (e.get("hash") or tx.get("hash"), _meta(e).get("TransactionResult")))
+        on_ledger.setdefault(_key(tx), (e.get("hash") or tx.get("hash"), _meta(e).get("TransactionResult"),
+                                         bool(int(tx.get("Flags", 0)) & LATE_FLAG)))
     out_rows, first_seen = [], {}
     for r, ev in zip(rows, decisions):
         tx = ev["decision"]["tx"]
-        h, result = on_ledger.get(_key(tx), (None, None)) if ev.get("allowed") else (None, None)
+        h, result, late = on_ledger.get(_key(tx), (None, None, False)) if ev.get("allowed") else (None, None, False)
         same_as = first_seen.get(h) if h else None  # a preview of a decision and the decision itself share one transaction
         if h and same_as is None:
             first_seen[h] = r.n
@@ -258,7 +266,7 @@ def verify_lockbox(address: str, src=DEVNET) -> dict:
             "problems": r.problems,
             "dry_run": bool(ev.get("dry_run")),
             "same_transaction_as_decision": same_as,
-            "on_ledger": {"result": result, "explorer": src.explorer(h)} if h else None,
+            "on_ledger": {"result": result, "explorer": src.explorer(h), "paid_late": late} if h else None,
         })
     return {
         "address": address,
@@ -269,12 +277,31 @@ def verify_lockbox(address: str, src=DEVNET) -> dict:
         "rulebook_matches_ledger": not problems,
         "rulebook_problems": problems,
         "decisions": out_rows,
+        "summary": _summary(out_rows, decisions),
         "signed": sum(1 for r in out_rows if r["referee"] == "signed"),
         "refused": sum(1 for r in out_rows if r["referee"] == "refused"),
         "all_match": bool(out_rows) and all(r["matches"] for r in out_rows),
         "has_published_decision_log": bool(decisions),
         "note": "A refused payment never reaches the ledger: the referee does not sign it, so it has no transaction hash.",
     }
+
+
+def _summary(rows: list[dict], decisions: list[dict]) -> dict:
+    """Counts per transaction type, so nobody has to count rows. A decision reviewed twice counts once."""
+    out: dict[str, dict] = {}
+    for r, ev in zip(rows, decisions):
+        if r.get("same_transaction_as_decision"):
+            continue
+        t = ev["decision"]["tx"].get("TransactionType", "?")
+        c = out.setdefault(t, {"decisions": 0, "signed": 0, "refused": 0, "went_through_on_ledger": 0,
+                               "rejected_by_ledger": 0, "paid_late": 0})
+        c["decisions"] += 1
+        c["signed" if r["referee"] == "signed" else "refused"] += 1
+        led = r.get("on_ledger")
+        if led:
+            c["went_through_on_ledger" if led["result"] == "tesSUCCESS" else "rejected_by_ledger"] += 1
+            c["paid_late"] += 1 if led.get("paid_late") and led["result"] == "tesSUCCESS" else 0
+    return out
 
 
 def get_rulebook(src=DEVNET) -> dict:

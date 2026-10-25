@@ -148,7 +148,9 @@ tests/                 unit, sim end-to-end, offline signing checks
 What is true today:
 - It runs locally, in the terminal (`agent/main.py --ask`) and behind the dashboard's "Why?" button.
 - It explains decisions; it never makes them. The referee decides with plain code in `lockbox/covenant.py`; nothing the AI says is sent back to it.
-- It is built for [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-getting-started.html) (`agent/main.py` is the Runtime entrypoint), but the AgentCore deployment is not finished: it has not been deployed yet.
+- Two places it runs, two models:
+  - **Locally, behind the dashboard's "Why?" button:** the model is `gpt-oss:120b` on Ollama Cloud, through the `OLLAMA_API_KEY` in your environment. It explains the decisions on the simulated ledger.
+  - **On [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-getting-started.html), us-west-2:** the Devnet auditor in `agentcore-auditor/`, with Claude Opus 5.5 on Amazon Bedrock (`us.anthropic.claude-opus-5-5`). It reads the public XRPL Devnet ledger. It uses no Ollama or Anthropic key; it runs on the Runtime's AWS role.
 
 ### On the dashboard: "Why?"
 
@@ -204,22 +206,24 @@ cd agent && .venv/bin/python build.py
 
 This writes `agent/dist/`: the agent code, only the five `lockbox` modules the replay needs (`verify`, `covenant`, `buckets`, `inflows`, `units`), the rulebook and the decision logs. The build fails if it finds a `.wallets.json`, an `.env` or key file, anything shaped like an XRPL seed, a private key or an AWS key, any seed from the local `.wallets.json`, or code that can sign or submit (`chain.py`, `roles.py`, `xrpl.wallet`, `xrpl.transaction`).
 
-### Deploy to AgentCore Runtime (not finished: needs AWS credentials)
+### Deployed on AgentCore Runtime (us-west-2)
 
-From the AgentCore docs, for an existing Python agent deployed as a CodeZip (no Docker needed). It needs Node.js 20.12 or later, `uv`, AWS credentials (`aws configure` or `AWS_PROFILE`) with AgentCore permissions, and Bedrock model access.
+`agentcore-auditor/LockboxAuditor/` was made with the official AgentCore CLI (`npm install -g @aws/agentcore`, `agentcore create --template agent-python-strands`) and deployed as a CodeZip runtime named `agent`. Its `app/agent/main.py` has the same system prompt and read-only tools as `agent/`, on the public XRPL Devnet ledger. `app/agent/model/load.py` sets the Bedrock model. The template's memory resource is removed: the auditor is stateless and stores nobody's questions.
+
+Ask the deployed auditor (needs AWS credentials for the account it is deployed in):
 
 ```bash
-npm install -g @aws/agentcore
-agentcore create --name LockboxAuditor --template agent-python-minimal
-cd agent && .venv/bin/python build.py && cd ..
-cp -R agent/dist/. LockboxAuditor/app/agent/      # main.py, pyproject.toml, lockbox/, data/
-cd LockboxAuditor
-agentcore deploy
-agentcore invoke --runtime agent --payload '{"prompt":"What did the referee do on lockbox rnC9yaPArTeyTijnNbhgGajUTd2WHr4CzG?"}'
+cd agentcore-auditor/LockboxAuditor
+agentcore status
+agentcore invoke --runtime agent --payload '{"prompt":"Explain what the referee did on the Lockbox account rnC9yaPArTeyTijnNbhgGajUTd2WHr4CzG from DEVNET.md, and whether every decision matched the rulebook."}'
 agentcore logs runtime
 ```
 
-Clean up with `agentcore remove all --yes` then `agentcore deploy --yes`. Never commit AWS keys; the CLI keeps provider secrets in `agentcore/.env.local`, which must stay out of git.
+It answers in about 30 seconds: 12 referee decisions, all signed and none refused (the loan, 7 repayments of which the ledger rejected one as `tecEXPIRED` and took two late, a withdrawal of the owner's own money, a supplier payment with invoice PO-1001, and the release), the rulebook fingerprint matching the one on the ledger, and every decision replaying the same.
+
+To change it: edit `agent/`, run `python agentcore-auditor/sync.py` (copies the tools, the five `lockbox` modules, the decision logs and the rulebook into `app/agent/`, then runs the secret check), test with `agentcore dev` and `agentcore invoke --runtime agent --local`, then `agentcore deploy`. Clean up with `agentcore remove all --yes` then `agentcore deploy --yes`.
+
+Kept out of git: `agentcore/.env.local` (local secrets), `agentcore/.cli/` and `agentcore/.cache/` (deployment state with the AWS account ID). `agentcore/aws-targets.json` is committed empty; the CLI fills it in locally on the first deploy. Never commit AWS keys.
 
 ## AI assistance
 

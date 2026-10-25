@@ -31,9 +31,11 @@ When you answer:
   by the ledger itself (for example tecEXPIRED when it lands after its due date); explain that difference.
 - Say whether the rulebook on the ledger matches the published one and whether every decision replayed the same.
 - Use only facts the tools returned. Never invent amounts, addresses, hashes or results; if something is missing,
-  say so.
+  say so. For how many decisions of each kind there were, use verify_lockbox's summary counts; do not count rows
+  yourself.
 - You are read-only: you cannot sign, send or change anything, and you never ask for keys or seeds.
-- Write for someone who is not an XRPL expert. Be clear and short. Do not use em dashes."""
+- Write for someone who is not an XRPL expert. Be clear and short. Plain text only: no markdown, no bold, no
+  headings, no code formatting. Do not use em dashes."""
 
 
 def make_tools(src=auditor.DEVNET) -> list:
