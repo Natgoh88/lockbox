@@ -155,14 +155,23 @@ Three tools, all read-only:
 
 The ledger client can only call `account_info`, `account_tx`, `ledger_entry` and `server_info`. There is no signing, no submitting and no wallet. What the ledger cannot say about the past (the clock, the loan as it stood) comes from the referee's published decision log for each Devnet lockbox in `agent/data/lockboxes/`.
 
-**Model.** With AWS credentials the Strands agent calls Amazon Bedrock (Strands' default, Claude Sonnet 4.6 in us-west-2; set `LOCKBOX_MODEL_ID` and `AWS_REGION` to change it) and writes the answer from the tools' results. Without credentials it writes the same facts with a fixed template (`agent/answer.py`), so the agent runs and is tested without an AWS account. `LOCKBOX_AUDITOR_MODE=bedrock` or `offline` forces one or the other.
+**Model.** The answer is written by Claude, which calls the three tools and explains each decision:
+
+| Mode | When | Model |
+| --- | --- | --- |
+| `anthropic` | `ANTHROPIC_API_KEY` is set (put it in `agent/.env`, which is gitignored; see `agent/.env.example`) | Claude Opus 5.5 (`claude-opus-5-5`) through the Anthropic API, effort `medium` |
+| `bedrock` | AWS credentials are available, as on AgentCore Runtime | Strands' default Bedrock model (Claude Sonnet 4.6, us-west-2) |
+| `offline` | neither | no model: `agent/answer.py` writes the same facts from a fixed template |
+
+`LOCKBOX_AUDITOR_MODE` forces one; the default `auto` takes the first available, in that order. `LOCKBOX_MODEL_ID` and `LOCKBOX_EFFORT` override the model and effort. Each answer says which mode wrote it.
 
 ### Run it locally
 
 ```bash
 cd agent
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python bedrock-agentcore strands-agents xrpl-py pytest
+uv pip install --python .venv/bin/python bedrock-agentcore 'strands-agents[anthropic]' xrpl-py pytest
+cp .env.example .env                 # then paste your Anthropic API key into .env
 
 .venv/bin/python main.py --ask "What did the referee do on lockbox rnC9yaPArTeyTijnNbhgGajUTd2WHr4CzG?"
 .venv/bin/python main.py --ask "Why was the payment refused on r4UuCzXSK6UReG5enELvQQEwkudqnBWNXe?"
@@ -171,7 +180,7 @@ uv pip install --python .venv/bin/python bedrock-agentcore strands-agents xrpl-p
 curl -X POST localhost:8080/invocations -H "Content-Type: application/json" \
   -d '{"prompt": "Why was the payment refused on r4UuCzXSK6UReG5enELvQQEwkudqnBWNXe?"}'
 
-.venv/bin/python -m pytest tests     # 16 tests, no network (recorded Devnet answers)
+.venv/bin/python -m pytest tests     # 20 tests, no network and no model calls
 ./demo.sh                            # one question and answer, for a 30-second screen recording
 ```
 

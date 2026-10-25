@@ -5,7 +5,7 @@ description = "Read-only agent that explains what a Lockbox referee did, from th
 requires-python = ">=3.12"
 dependencies = [
     "bedrock-agentcore",
-    "strands-agents",
+    "strands-agents[anthropic]",
     "xrpl-py>=5.2",
 ]
 

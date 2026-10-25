@@ -26,6 +26,7 @@ FORBIDDEN_NAMES = re.compile(r"(^|/)(\.wallets\.json|\.env(\..*)?|.*\.pem|.*\.ke
 FORBIDDEN_MODULES = {"chain.py", "roles.py", "scenario.py", "devnet.py", "sim.py", "simsetup.py", "protocol.py"}
 SECRET_PATTERNS = {
     "XRPL seed": re.compile(r"(?<![0-9A-Za-z])s[1-9A-HJ-NP-Za-km-z]{28,30}(?![0-9A-Za-z])"),
+    "Anthropic API key": re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"),
     "AWS access key": re.compile(r"(?<![0-9A-Z])(AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])"),
     "AWS secret key setting": re.compile(r"aws_secret_access_key", re.I),
     "private key": re.compile(r"PRIVATE KEY-----|\"private_key\"\s*:"),
@@ -35,13 +36,22 @@ SIGNING_IMPORTS = re.compile(r"from xrpl\.(wallet|transaction)|import xrpl\.(wal
 
 
 def _known_seeds() -> list[str]:
+    """Seeds from the repo's .wallets.json and secret values from agent/.env: none may appear in a build."""
+    out = []
     p = REPO / ".wallets.json"
-    if not p.is_file():
-        return []
-    try:
-        return [v for v in json.loads(p.read_text()).values() if isinstance(v, str) and v]
-    except (ValueError, AttributeError):
-        return []
+    if p.is_file():
+        try:
+            out += [v for v in json.loads(p.read_text()).values() if isinstance(v, str) and v]
+        except (ValueError, AttributeError):
+            pass
+    env = HERE / ".env"
+    if env.is_file():
+        for line in env.read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if len(value) >= 12:
+                    out.append(value)
+    return out
 
 
 def check(folder: Path) -> list[str]:
@@ -63,7 +73,7 @@ def check(folder: Path) -> list[str]:
             if pat.search(text):
                 problems.append(f"{rel}: looks like it contains a {name}")
         if any(s in text for s in seeds):
-            problems.append(f"{rel}: contains a seed from .wallets.json")
+            problems.append(f"{rel}: contains a seed from .wallets.json or a secret from agent/.env")
         if f.suffix == ".py" and not rel.startswith("lockbox/") and SIGNING_IMPORTS.search(text):
             problems.append(f"{rel}: imports signing or submitting code")
     return problems

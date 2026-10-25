@@ -117,3 +117,50 @@ def test_strands_agent_has_the_three_read_only_tools():
     assert out["mode"] == "offline" and "within_free_cash" in out["result"]
     names = {t.tool_name for t in (main.get_account_history, main.verify_lockbox, main.get_rulebook)}
     assert names == {"get_account_history", "verify_lockbox", "get_rulebook"}
+
+
+# ---- the AI model connection (no network: the model is built, never called) ----
+
+FAKE_ANTHROPIC_KEY = "sk-" + "ant-" + "test0000000000000000000000000000"
+
+
+def test_mode_prefers_anthropic_when_a_key_is_set(monkeypatch):
+    import main
+    monkeypatch.setenv("LOCKBOX_AUDITOR_MODE", "auto")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_ANTHROPIC_KEY)
+    assert main.mode() == "anthropic"
+    monkeypatch.setenv("LOCKBOX_AUDITOR_MODE", "offline")
+    assert main.mode() == "offline"
+
+
+def test_anthropic_model_is_claude_opus_5_5_with_explicit_effort(monkeypatch):
+    import main
+    from strands.models.anthropic import AnthropicModel
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_ANTHROPIC_KEY)
+    monkeypatch.delenv("LOCKBOX_MODEL_ID", raising=False)
+    m = main.build_model("anthropic")
+    assert isinstance(m, AnthropicModel)
+    cfg = m.get_config()
+    assert cfg["model_id"] == "claude-opus-5-5" and cfg["max_tokens"] == 16000
+    assert cfg["params"] == {"output_config": {"effort": "medium"}}
+    assert "thinking" not in cfg["params"]  # Opus 5.5 thinks adaptively on its own
+    a = main.agent("anthropic")
+    assert set(a.tool_names) == {"get_account_history", "verify_lockbox", "get_rulebook"}
+
+
+def test_env_file_loads_without_overriding(tmp_path, monkeypatch):
+    import main
+    env = tmp_path / ".env"
+    env.write_text(f"# comment\nANTHROPIC_API_KEY={FAKE_ANTHROPIC_KEY}\nexport LOCKBOX_EFFORT='low'\nEMPTY=\n")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("LOCKBOX_EFFORT", "high")
+    main.load_env(env)
+    import os
+    assert os.environ["ANTHROPIC_API_KEY"] == FAKE_ANTHROPIC_KEY
+    assert os.environ["LOCKBOX_EFFORT"] == "high"  # already set: not overridden
+    assert "EMPTY" not in os.environ
+
+
+def test_build_check_fails_on_an_anthropic_key(tmp_path):
+    (tmp_path / "notes.txt").write_text(f"key {FAKE_ANTHROPIC_KEY}")
+    assert any("Anthropic API key" in p for p in build.check(tmp_path))
