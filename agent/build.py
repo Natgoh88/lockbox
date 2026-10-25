@@ -19,7 +19,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 DIST = HERE / "dist"
 
-AGENT_FILES = ["main.py", "auditor.py", "answer.py", "ledger.py", "pyproject.toml"]
+AGENT_FILES = ["main.py", "model.py", "auditor.py", "answer.py", "ledger.py", "pyproject.toml"]
 LOCKBOX_MODULES = ["__init__.py", "verify.py", "covenant.py", "buckets.py", "inflows.py", "units.py"]
 
 FORBIDDEN_NAMES = re.compile(r"(^|/)(\.wallets\.json|\.env(\..*)?|.*\.pem|.*\.key|credentials)$")

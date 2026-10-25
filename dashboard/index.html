@@ -72,6 +72,13 @@
   td.res { font-weight:700; white-space:nowrap; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; vertical-align:1px; }
   .older { margin-top:18px; }
+  .ask-row { display:flex; gap:12px; align-items:flex-start; margin-top:10px; }
+  .ask-row button { padding:6px 12px; font-size:14px; }
+  .ask-out { font-size:16px; line-height:1.45; max-width:72ch; }
+  .ask-out .lab2 { display:block; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--mute); margin-bottom:2px; }
+  .ask-out.wait, .ask-out.off { color:var(--grey); font-size:14px; padding-top:6px; }
+  .ask-any { display:flex; gap:8px; margin-top:16px; }
+  .ask-any input { flex:1; font:15px var(--sans); padding:9px 12px; border:1px solid var(--line); border-radius:4px; background:var(--panel); color:var(--ink); min-width:0; }
   #verify { margin-top:16px; }
   .vhead { font-size:26px; margin-bottom:6px; }
 
@@ -151,8 +158,11 @@
       <button id="b-verify" class="pri" data-step="8">Verify the referee</button>
     </div>
     <div class="banner" id="banner"></div>
+    <div class="ask-row" id="ask-row" style="display:none"><button id="b-why" title="An AI explains this decision. It never changes it.">Why?</button><div class="ask-out" id="ask-why"></div></div>
     <div id="hero-checks"></div>
     <div class="older"><table id="decisions"></table></div>
+    <div class="ask-any"><input id="ask-q" maxlength="500" placeholder="Ask the auditor anything about this lockbox" aria-label="Ask the auditor anything"><button id="b-ask">Ask</button></div>
+    <div class="ask-out" id="ask-any-out"></div>
     <div id="verify"></div>
   </section>
 
@@ -283,6 +293,31 @@ function who(a) {
   return short(a);
 }
 const isDry = e => e.kind === 'verdict' && +e.amount === 1;  // a 1-drop approval is a dry run or a test, not a real payment
+// The AI auditor only explains a decision the referee already made. Its answer is shown, never used.
+async function askAuditor(question, out) {
+  out.className = 'ask-out wait'; out.textContent = 'Asking the auditor...';
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+    const r = await fetch('/api/ask', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({question}), signal: ctl.signal});
+    clearTimeout(t);
+    const j = await r.json();
+    if (!r.ok || !j.answer) throw new Error(j.error || 'no answer');
+    out.className = 'ask-out';
+    out.innerHTML = `<span class="lab2">AI auditor (explains, doesn't decide)</span>${esc(j.answer)}`;
+  } catch (e) { out.className = 'ask-out off'; out.textContent = 'Auditor unavailable'; }
+}
+
+function askWhy() {
+  const h = evs.filter(e => e.kind === 'verdict' && !isDry(e)).reverse()[0];
+  if (!h) return;
+  askAuditor(`Explain in two or three plain-English sentences why the referee ${h.allowed ? 'signed' : 'refused'} this transaction: ${sentence(h)}, deciding rule ${h.rule}.`, $('ask-why'));
+}
+
+function askAnything() {
+  const q = $('ask-q').value.trim();
+  if (q) askAuditor(q, $('ask-any-out'));
+}
+
 function sentence(e) {
   const a = e.amount ? amt(e.amount) : '';
   if (e.tx === 'Payment') return `${a} to ${who(e.to)}${S && e.to === S.lender_address ? ' (recovery)' : ''}`;
@@ -531,6 +566,8 @@ function renderDecisions() {
       <div class="why">${esc(ruleText(h))}</div>
       <div class="meta">Deciding rule <span class="mono">${esc(h.rule || '')}</span>${h.rulebook ? `, rulebook ${esc(h.rulebook)} v${esc(h.rulebook_version)} <span class="mono">${esc((h.rulebook_fingerprint || '').slice(0, 12))}\u2026</span>` : ''}${link ? `, on the ledger ${link}` : ''}</div>`;
     if (heroId !== h.i && !ok) { void ban.offsetWidth; ban.classList.add('flash'); }
+    if (heroId !== h.i) { $('ask-why').className = 'ask-out'; $('ask-why').innerHTML = ''; }
+    $('ask-row').style.display = '';
     heroId = h.i;
     const cs = (h.checks || []).map(c => `<span class="${c.ok ? 'ok' : 'no'}">${esc(c.name)}</span>`).join('');
     $('hero-checks').innerHTML = `<details class="checks"><summary>All ${(h.checks || []).length} checks</summary><div class="clist">${cs}</div></details>`;
@@ -612,11 +649,15 @@ function renderResult(r) { if (r.verdict) toast(r.verdict.allowed ? 'Signed: ' +
 function resetView() {
   evs = []; since = 0; heroId = null; verified = false; salesOn = true;
   $('feed').innerHTML = ''; $('decisions').innerHTML = ''; $('verify').innerHTML = ''; $('hero-checks').innerHTML = '';
+  $('ask-why').innerHTML = ''; $('ask-any-out').innerHTML = ''; $('ask-row').style.display = 'none';
   $('banner').className = 'banner';
 }
 act('b-lock', () => post('lock')); act('b-quote', () => post('quote')); act('b-borrow', () => post('borrow'));
 act('b-free', () => post('withdraw', {mode: 'free'})); act('b-all', () => post('withdraw', {mode: 'all'}));
 act('b-sup', () => post('pay_supplier')); act('b-own', () => post('own_wallet'));
+$('b-why').addEventListener('click', askWhy);
+$('b-ask').addEventListener('click', askAnything);
+$('ask-q').addEventListener('keydown', e => { if (e.key === 'Enter') askAnything(); });
 $('b-verify').addEventListener('click', verifyReferee);
 act('b-payoff', () => post('payoff')); act('b-release', () => post('release'));
 // one click is one payment interval; while sales are stopped no buyer pays

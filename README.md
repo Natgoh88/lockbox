@@ -143,7 +143,18 @@ tests/                 unit, sim end-to-end, offline signing checks
 
 ## AWS: Lockbox auditor on AgentCore
 
-`agent/` is a read-only agent built with [Strands Agents](https://strandsagents.com) for [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-getting-started.html). Give it a lockbox address, or ask why a payment was refused. It reads the public XRPL Devnet ledger, replays the referee's decisions against the published rulebook, and explains in plain English what happened and which rule decided each payment.
+`agent/` is a read-only AI auditor built with [Strands Agents](https://strandsagents.com). It explains referee decisions: give it a lockbox address, or ask why a payment was refused, and it reads the ledger, replays the referee's decisions against the published rulebook, and explains in plain English what happened and which rule decided each payment.
+
+What is true today:
+- It runs locally, in the terminal (`agent/main.py --ask`) and behind the dashboard's "Why?" button.
+- It explains decisions; it never makes them. The referee decides with plain code in `lockbox/covenant.py`; nothing the AI says is sent back to it.
+- It is built for [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-getting-started.html) (`agent/main.py` is the Runtime entrypoint), but the AgentCore deployment is not finished: it has not been deployed yet.
+
+### On the dashboard: "Why?"
+
+Next to the referee's latest decision, **Why?** asks the auditor to explain it in two or three sentences, labelled "AI auditor (explains, doesn't decide)". There is also an "Ask the auditor anything" box. Behind them, `POST /api/ask` takes a read-only snapshot of the current simulated ledger and the referee's decision log, and runs the agent on it with a 20 second limit. If no model key is set, or the model is slow or down, it answers `{"answer": null, "error": ...}`, the page shows a small grey "Auditor unavailable", and the rest of the demo works exactly as before.
+
+To turn it on: `pip install -r agent/requirements.txt` in the main `.venv`, and set `OLLAMA_API_KEY` (or `ANTHROPIC_API_KEY`) in your shell or in `agent/.env`, which is gitignored. Keys come only from environment variables, never from code or committed files. `LOCKBOX_AUDITOR_MODE=offline` turns it off.
 
 Three tools, all read-only:
 
@@ -193,7 +204,7 @@ cd agent && .venv/bin/python build.py
 
 This writes `agent/dist/`: the agent code, only the five `lockbox` modules the replay needs (`verify`, `covenant`, `buckets`, `inflows`, `units`), the rulebook and the decision logs. The build fails if it finds a `.wallets.json`, an `.env` or key file, anything shaped like an XRPL seed, a private key or an AWS key, any seed from the local `.wallets.json`, or code that can sign or submit (`chain.py`, `roles.py`, `xrpl.wallet`, `xrpl.transaction`).
 
-### Deploy to AgentCore Runtime (not run yet: needs AWS credentials)
+### Deploy to AgentCore Runtime (not finished: needs AWS credentials)
 
 From the AgentCore docs, for an existing Python agent deployed as a CodeZip (no Docker needed). It needs Node.js 20.12 or later, `uv`, AWS credentials (`aws configure` or `AWS_PROFILE`) with AgentCore permissions, and Bedrock model access.
 

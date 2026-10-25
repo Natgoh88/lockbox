@@ -11,8 +11,10 @@ import os
 import json
 import random
 import tempfile
+import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as AskTimeout
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -278,6 +280,74 @@ def verify_referee():
                           "replayed_rule": r.replayed_rule, "matches": r.matches, "problems": r.problems} for r in rows],
                 "ok": not problems and all(r.matches for r in rows)}
     return guarded(go)
+
+
+ASK_TIMEOUT = 20  # seconds: the demo never waits longer than this for the auditor
+_ask_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="auditor")
+
+
+def _agent_on_path() -> None:
+    agent_dir = str(HERE / "agent")
+    if agent_dir not in sys.path:
+        sys.path.insert(0, agent_dir)
+
+
+def _ledger_snapshot():
+    """A frozen copy of the lockbox for the auditor: account, history, broker entry, the referee's decision log and
+    the rulebook. Taken under the lock in a few milliseconds; the auditor then reads only this copy."""
+    _agent_on_path()
+    from auditor import Snapshot
+    s = sc()
+    lb = s.lockbox
+    st = s.b.lockbox_state(lb)
+    info = {"Balance": str(s.b.balance(lb)), "Flags": 0x00100000 if st["master_disabled"] else 0,
+            "signer_lists": [{"SignerQuorum": st["quorum"], "SignerEntries": [
+                {"SignerEntry": {"Account": a, "SignerWeight": w}} for a, w in st["signers"].items()]}] if st["signers"] else []}
+    if st.get("regular_key"):
+        info["RegularKey"] = st["regular_key"]
+    entries = {s.broker_id: {"Data": s.b.broker_view(s.broker_id).data}} if s.broker_id else {}
+    if MODE == "sim":
+        logged = events.recent(10_000)
+    else:
+        f = Path(os.environ.get("LOCKBOX_EVENTS", str(HERE / "data" / "events.jsonl")))
+        logged = [json.loads(x) for x in f.read_text().splitlines() if x.strip()] if f.exists() else []
+    raw = Path(s.state()["rulebook"]["file"]).read_bytes()
+    network = "the simulated ledger used in this demo" if MODE == "sim" else "XRPL Devnet"
+    return Snapshot(network, lb, info, list(reversed(s.b.account_tx(lb))), entries, logged, raw)
+
+
+def _auditor_answer(question: str, snap) -> str:
+    """Runs the auditor agent (agent/model.py) on the snapshot. It only reads and explains; nothing it returns is
+    used by the referee."""
+    _agent_on_path()
+    import model
+    m = model.mode()
+    if m == "offline":
+        raise RuntimeError("no model is configured (set OLLAMA_API_KEY or ANTHROPIC_API_KEY)")
+    a = model.make_agent(m, snap)
+    prompt = (f"The lockbox is {snap.lockbox} on {snap.network}. Answer in plain English, at most a short paragraph.\n\n"
+              f"{question}")
+    return model.answer.clean(str(a(prompt))).strip()
+
+
+class Ask(BaseModel):
+    question: str = ""
+
+
+@app.post("/api/ask")
+def ask_auditor(b: Ask):
+    """Ask the AI auditor to explain. Always HTTP 200: {"answer": text} or {"answer": null, "error": why}."""
+    q = (b.question or "").strip()[:1000]
+    if not q:
+        return {"answer": None, "error": "empty question"}
+    try:
+        with LOCK:
+            snap = _ledger_snapshot()
+        return {"answer": _ask_pool.submit(_auditor_answer, q, snap).result(timeout=ASK_TIMEOUT) or None}
+    except AskTimeout:
+        return {"answer": None, "error": f"the auditor took longer than {ASK_TIMEOUT} seconds"}
+    except Exception as e:  # never let the auditor break the demo
+        return {"answer": None, "error": f"{type(e).__name__}: {str(e)[:200]}"}
 
 
 @app.post("/api/auto")

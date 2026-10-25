@@ -63,10 +63,68 @@ def known_lockboxes() -> list[str]:
     return sorted(p.name for p in d.iterdir() if p.is_dir()) if d.is_dir() else []
 
 
+class Devnet:
+    """The public XRPL Devnet ledger plus the referee's published decision logs in data/."""
+    network = "XRPL Devnet"
+
+    def account_info(self, address: str) -> dict:
+        return ledger.account_info(address)
+
+    def account_tx(self, address: str) -> list[dict]:
+        return ledger.account_tx(address)
+
+    def ledger_entry(self, index: str) -> dict:
+        return ledger.ledger_entry(index)
+
+    def decisions(self, address: str) -> list[dict]:
+        return _decisions(address)
+
+    def rulebook(self, address: str | None = None) -> tuple[bytes, str]:
+        path = _rulebook_path(address)
+        return path.read_bytes(), (path.name if path.name != "rulebook.json" else f"{address}/rulebook.json")
+
+    def explorer(self, tx_hash: str | None) -> str | None:
+        return ledger.EXPLORER + tx_hash if tx_hash else None
+
+
+class Snapshot:
+    """A frozen, read-only copy of one lockbox: its account, history, the broker entries it points at, the
+    referee's decision log and the rulebook. The dashboard takes one of its simulated ledger for each question."""
+
+    def __init__(self, network: str, lockbox: str, info: dict, history: list[dict], entries: dict[str, dict],
+                 decisions: list[dict], rulebook_raw: bytes, rulebook_name: str = RULEBOOK_FILE):
+        self.network, self.lockbox = network, lockbox
+        self._info, self._history, self._entries = info, history, entries
+        self._decisions = [e for e in decisions if e.get("kind") == "verdict" and "decision" in e]
+        self._rulebook = (rulebook_raw, rulebook_name)
+
+    def account_info(self, address: str) -> dict:
+        return dict(self._info) if address == self.lockbox else {}
+
+    def account_tx(self, address: str) -> list[dict]:
+        return list(self._history) if address == self.lockbox else []
+
+    def ledger_entry(self, index: str) -> dict:
+        return dict(self._entries.get(index, {}))
+
+    def decisions(self, address: str) -> list[dict]:
+        return list(self._decisions) if address == self.lockbox else []
+
+    def rulebook(self, address: str | None = None) -> tuple[bytes, str]:
+        return self._rulebook
+
+    def explorer(self, tx_hash: str | None) -> str | None:
+        return None  # a simulated ledger has no explorer
+
+
+DEVNET = Devnet()
+
+
 def _xrp(drops) -> str:
+    """Amounts in XRP, with drops spelled out for small ones, so a model never has to convert units itself."""
     if isinstance(drops, str) and drops.isdigit():
         d = int(drops)
-        return f"{d / 1e6:.2f} XRP" if d >= 10_000 else f"{d} drops"
+        return f"{d / 1e6:.2f} XRP" if d >= 10_000 else f"{d / 1e6:.6f} XRP ({d} drops)"
     return ""
 
 
@@ -109,14 +167,14 @@ def _roles(address: str, history: list[dict], doc: dict, decisions: list[dict]) 
     return roles
 
 
-def get_account_history(address: str, limit: int = 60) -> dict:
-    """What the public XRPL Devnet ledger shows for this account: its keys and the payments it made."""
-    info = ledger.account_info(address)
+def get_account_history(address: str, limit: int = 60, src=DEVNET) -> dict:
+    """What the ledger shows for this account: its keys and the payments it made."""
+    info = src.account_info(address)
     if not info:
-        return {"address": address, "exists": False, "network": "XRPL Devnet"}
-    history = ledger.account_tx(address)
-    decisions = _decisions(address)
-    roles = _roles(address, history, json.loads(_rulebook_path(address).read_text()), decisions)
+        return {"address": address, "exists": False, "network": src.network}
+    history = src.account_tx(address)
+    decisions = src.decisions(address)
+    roles = _roles(address, history, json.loads(src.rulebook(address)[0]), decisions)
     lists = info.get("signer_lists") or []
     signers = {e["SignerEntry"]["Account"]: int(e["SignerEntry"]["SignerWeight"]) for e in (lists[0]["SignerEntries"] if lists else [])}
     txs, received = [], 0
@@ -137,12 +195,12 @@ def get_account_history(address: str, limit: int = 60) -> dict:
             "memos": _memos(tx),
             "late_payment_flag": bool(int(tx.get("Flags", 0)) & LATE_FLAG) if tx.get("TransactionType") == "LoanPay" else None,
             "signed_by": [f"{roles.get(a, 'unknown')} {a}" for a in _signers(tx)],
-            "explorer": ledger.EXPLORER + h if h else None,
+            "explorer": src.explorer(h),
         })
     return {
         "address": address,
         "exists": True,
-        "network": "XRPL Devnet",
+        "network": src.network,
         "balance": _xrp(info.get("Balance")),
         "master_key_disabled": bool(int(info.get("Flags", 0)) & 0x00100000),
         "regular_key": info.get("RegularKey"),
@@ -159,21 +217,21 @@ def _key(tx: dict) -> tuple:
             tx.get("Amount"), tx.get("LoanID"), tx.get("RegularKey"))
 
 
-def verify_lockbox(address: str) -> dict:
+def verify_lockbox(address: str, src=DEVNET) -> dict:
     """Check the published rulebook against the ledger, then replay every referee decision for this lockbox."""
-    decisions = _decisions(address)
-    path = _rulebook_path(address)
-    doc = json.loads(path.read_text())
-    history = ledger.account_tx(address)
-    info = ledger.account_info(address)
+    decisions = src.decisions(address)
+    raw, rulebook_name = src.rulebook(address)
+    doc = json.loads(raw)
+    history = src.account_tx(address)
+    info = src.account_info(address)
     if not info:
-        return {"address": address, "exists": False, "network": "XRPL Devnet"}
+        return {"address": address, "exists": False, "network": src.network}
     loanset = next((_tx(e) for e in history if _tx(e).get("TransactionType") == "LoanSet"
                     and _tx(e).get("Counterparty") == address and _meta(e).get("TransactionResult") == "tesSUCCESS"), None)
-    broker_data = ledger.ledger_entry(loanset["LoanBrokerID"]).get("Data") if loanset else None
+    broker_data = src.ledger_entry(loanset["LoanBrokerID"]).get("Data") if loanset else None
     problems = V.rulebook_problems(doc, broker_data, loanset.get("Data") if loanset else None)
     rows = V.replay(decisions, history, int(info["Balance"]), address, doc,
-                    lambda broker: ledger.ledger_entry(broker).get("Data"))
+                    lambda broker: src.ledger_entry(broker).get("Data"))
     roles = _roles(address, history, doc, decisions)
     V.label_rows(rows, decisions, roles)
     on_ledger = {}  # the ledger transaction a signed decision became. A refused one shares its Sequence with the
@@ -200,13 +258,13 @@ def verify_lockbox(address: str) -> dict:
             "problems": r.problems,
             "dry_run": bool(ev.get("dry_run")),
             "same_transaction_as_decision": same_as,
-            "on_ledger": {"result": result, "explorer": ledger.EXPLORER + h} if h else None,
+            "on_ledger": {"result": result, "explorer": src.explorer(h)} if h else None,
         })
     return {
         "address": address,
-        "network": "XRPL Devnet",
+        "network": src.network,
         "rulebook": {"name": doc.get("name"), "version": doc.get("version"), "fingerprint": doc.get("fingerprint"),
-                     "file": path.name if path.name != "rulebook.json" else f"{address}/rulebook.json"},
+                     "file": rulebook_name},
         "on_ledger_fingerprint": broker_data,
         "rulebook_matches_ledger": not problems,
         "rulebook_problems": problems,
@@ -219,11 +277,10 @@ def verify_lockbox(address: str) -> dict:
     }
 
 
-def get_rulebook() -> dict:
+def get_rulebook(src=DEVNET) -> dict:
     """The published rulebook and its fingerprints: sha256 of the file, and the rulebook fingerprint recomputed
     from its name, version and rules (the value written in the loan broker's Data field)."""
-    path = _rulebook_path()
-    raw = path.read_bytes()
+    raw = src.rulebook()[0]
     doc = json.loads(raw)
     recomputed = C.rulebook_fingerprint(doc.get("config", {}))
     return {

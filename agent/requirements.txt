@@ -1,0 +1,4 @@
+# The auditor agent. Install into the main .venv to enable "Ask the auditor" on the dashboard:
+#   pip install -r agent/requirements.txt
+strands-agents[anthropic,ollama]
+bedrock-agentcore

@@ -11,8 +11,12 @@ TX_HASH = re.compile(r"\b[0-9A-Fa-f]{64}\b")
 
 
 def clean(text: str) -> str:
-    """House style: no em or en dashes."""
-    return text.replace(" — ", ", ").replace("—", ", ").replace("–", "-")
+    """House style: no em or en dashes, plain text (no markdown bold), ordinary spaces and quotes."""
+    text = text.replace(" \u2014 ", ", ").replace("\u2014", ", ").replace("\u2013", "-")
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    for ch, plain in (("\u202f", " "), ("\u00a0", " "), ("\u2018", "'"), ("\u2019", "'"), ("\u201c", '"'), ("\u201d", '"')):
+        text = text.replace(ch, plain)
+    return text
 
 
 def _short(a: str) -> str:
@@ -33,9 +37,9 @@ def _decision_line(r: dict) -> str:
             line += f" At that moment the owner could take at most {r['owner_could_take']}; the rest was loan money or held back for repayment."
         line += " Because the referee refused, it was never signed, so it is not on the ledger."
     elif led and led["result"] == "tesSUCCESS":
-        line += f" On the ledger: {led['explorer']}"
+        line += f" On the ledger: {led['explorer']}" if led["explorer"] else " It went through on the ledger."
     elif led:
-        line += f" The ledger then rejected it with {led['result']} ({led['explorer']})."
+        line += f" The ledger then rejected it with {led['result']}" + (f" ({led['explorer']})." if led["explorer"] else ".")
         if led["result"] == "tecEXPIRED":
             line += " It was sent just before the due date and validated just after, so it had to be paid again as a late payment."
     line += " Replay: " + ("matches." if r["matches"] else "DOES NOT MATCH: " + "; ".join(r["problems"]))
@@ -74,7 +78,7 @@ def _verify_summary(v: dict, only_refused: bool = False) -> str:
 def _about_tx(h: str, address: str) -> str:
     v = auditor.verify_lockbox(address)
     for r in v["decisions"]:
-        if r.get("on_ledger") and r["on_ledger"]["explorer"].upper().endswith(h.upper()):
+        if r.get("on_ledger") and (r["on_ledger"]["explorer"] or "").upper().endswith(h.upper()):
             return clean(f"Transaction {h[:12]}... on lockbox {address}:\n" + _decision_line(r))
     hist = auditor.get_account_history(address, limit=1000)
     if any(t["explorer"] and t["explorer"].upper().endswith(h.upper()) for t in hist["transactions"]):
