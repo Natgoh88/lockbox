@@ -24,9 +24,17 @@ CONFIG_FIELDS = ("max_fee_drops", "fee_buffer_drops", "pay_allowance_drops", "re
 NOT_RECORDED = {"buckets", "balance_drops", "rulebook_hash", "broker_data", *CONFIG_FIELDS}
 
 
+# a freeze outranks every other reason for a refusal: it is why nothing can go out, whatever the amount
+FREEZE_CHECKS = ("not_in_default", "loan_current", "revenue_covers_installment")
+
+
 def deciding_rule(v: Verdict) -> str:
-    """The first failed check for a refusal; for an approval, the last (most specific) check that passed."""
+    """For a refusal, the freeze if the account is frozen, otherwise the first failed check; for an approval, the
+    last (most specific) check that passed. Explanation only: the verdict needs every check either way."""
     bad = [c.name for c in v.checks if not c.ok]
+    frozen = [n for n in bad if n in FREEZE_CHECKS]
+    if frozen:
+        return frozen[0]
     if bad:
         return bad[0]
     return v.checks[-1].name if v.checks else ""

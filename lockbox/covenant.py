@@ -353,12 +353,12 @@ def frozen_reasons(ctx: CovenantContext) -> list[str]:
 def _not_frozen(add, ctx: CovenantContext) -> None:
     loan = ctx.loan
     if loan is not None and loan.active:
-        add("loan_current", ctx.now <= loan.next_due, "an installment is past due, withdrawals are frozen")
+        add("loan_current", ctx.now <= loan.next_due, "A payment is past due, so withdrawals are frozen.")
         streak = buckets_of(ctx).short_streak
         add("revenue_covers_installment", streak < ctx.freeze_after_short_intervals,
-            f"revenue was below the installment {streak} intervals in a row, withdrawals are frozen")
+            f"Sales were below the installment {streak} periods in a row, so withdrawals are frozen.")
     if in_default(ctx):
-        add("not_in_default", False, "the loan defaulted and recovery is still pending")
+        add("not_in_default", False, "The loan defaulted and the lender is still owed, so nothing goes to the owner.")
 
 
 def _approval_checks(add, tx: dict, a: ApprovalState) -> None:

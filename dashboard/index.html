@@ -204,8 +204,8 @@
     <button id="b-quote" class="pri" data-step="3">Underwrite</button>
     <button id="b-borrow" class="pri" data-step="4">Make the loan</button></div></div>
   <div class="grp" id="g-sim"><span>Time (simulated)</span><div class="btns">
-    <button id="b-adv1" title="Advance 2 minutes, buyers keep paying">Advance 2 min</button>
-    <button id="b-adv2" data-step="7" title="Advance 10 minutes with no buyer payments">Stop sales</button>
+    <button id="b-adv1" data-step="7" title="Advance one 2-minute interval">Advance 2 min</button>
+    <button id="b-adv2" data-step="7" title="Buyers stop paying, then advance one 2-minute interval">Stop sales</button>
     <button id="b-reset">Reset</button></div></div>
   <div class="grp" id="g-dev" style="display:none"><span>Autopilot (Devnet)</span><div class="btns">
     <button id="b-rev">Revenue: on</button><button id="b-auto">Servicer: on</button></div></div>
@@ -222,7 +222,7 @@ const amt = d => { d = +d || 0; return Math.abs(d) > 0 && Math.abs(d) < 10000
 const short = a => a ? a.slice(0, 5) + '\u2026' + a.slice(-4) : '';
 const mono = a => `<span class="mono">${esc(short(a))}</span>`;
 const EXPLORER = 'https://devnet.xrpl.org/transactions/';
-let since = 0, S = null, evs = [], heroId = null, verified = false;
+let since = 0, S = null, evs = [], heroId = null, verified = false, salesOn = true;
 
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 3200); }
 async function post(path, body) {
@@ -269,7 +269,7 @@ const RULES = {
 function ruleText(e) {
   if (!e.allowed) {
     const c = (e.checks || []).find(c => c.name === e.rule && !c.ok);
-    if (c && /^That would take/.test(c.detail || '')) return c.detail;
+    if (c && /^[A-Z]/.test(c.detail || '')) return c.detail;
   }
   return RULES[e.rule] || (e.rule ? e.rule.replace(/_/g, ' ') : '');
 }
@@ -315,6 +315,7 @@ const PARTS = [
   ['reserve', 'Ledger reserve', 'var(--b7)'], ['fee_buffer', 'Fee buffer', 'var(--b7)'],
 ];
 
+const FREEZE = ['not_in_default', 'loan_current', 'revenue_covers_installment'];
 // the next step of DEMO.md, highlighted on its button
 function nextStep() {
   if (!S || S.mode !== 'sim') return null;
@@ -327,9 +328,12 @@ function nextStep() {
   const loanAt = after('loan_set');
   const refusedOwn = evs.some(e => toOwner(e) && !e.allowed && e.i > loanAt);
   if (bk.unspent_principal > 0) return refusedOwn ? 'b-sup' : 'b-own';
-  if (S.status !== 'defaulted') return ['current', 'late', 'impaired', 'defaultable'].includes(S.status) ? 'b-adv2' : null;
-  const defAt = after('default');
-  if (!evs.some(e => toOwner(e) && e.i > defAt)) return 'b-all';
+  if (S.status !== 'defaulted') {
+    if (!['current', 'late', 'impaired', 'defaultable'].includes(S.status)) return null;
+    if (salesOn) return 'b-adv2';
+    const frozenRefusal = evs.some(e => toOwner(e) && !e.allowed && FREEZE.includes(e.rule) && e.i > loanAt);
+    return (S.frozen || []).length && !frozenRefusal ? 'b-all' : 'b-adv1';
+  }
   return verified ? null : 'b-verify';
 }
 
@@ -402,13 +406,15 @@ function render() {
   $('b-borrow').disabled = !S.has_offer || !(o && o.approved) || S.has_loan;
   $('b-all').disabled = !locked;
   const withdrawable = (bk.earned_free_cash || 0) + (bk.owner_funds || 0);
-  $('b-free').disabled = !locked || !(withdrawable > 0);
+  $('b-free').disabled = !locked || !(withdrawable > 0 || (S.frozen || []).length);
   $('b-free').title = withdrawable > 0 ? `earned free cash plus owner's own money: ${amt(withdrawable)}` : "no earned free cash or owner's own money right now";
   $('b-sup').disabled = !S.has_loan || !Object.keys(S.approved_payees || {}).length;
   $('b-own').disabled = !S.has_loan || !(bk.unspent_principal > 0);
   $('b-own').title = bk.unspent_principal > 0 ? `asks for everything the owner may take plus ${amt(bk.unspent_principal)} of loan money` : 'no loan money left in the lockbox';
   $('b-payoff').disabled = !S.has_loan || ['paid', 'defaulted'].includes(S.status);
   $('b-release').disabled = !locked;
+  $('b-adv2').textContent = salesOn ? 'Stop sales' : 'Resume sales';
+  $('b-adv1').title = salesOn ? 'Advance one 2-minute interval, buyers keep paying' : 'Advance one 2-minute interval, no buyer payments';
   $('g-sim').style.display = sim ? '' : 'none';
   $('g-dev').style.display = sim ? 'none' : '';
   if (S.auto) { $('b-rev').textContent = 'Revenue: ' + (S.auto.revenue ? 'on' : 'off'); $('b-auto').textContent = 'Servicer: ' + (S.auto.autopilot ? 'on' : 'off'); }
@@ -604,7 +610,7 @@ const act = (id, fn) => $(id).addEventListener('click', async () => {
 });
 function renderResult(r) { if (r.verdict) toast(r.verdict.allowed ? 'Signed: ' + (r.ok ? 'sent' : 'rejected by the ledger') : 'Refused by the referee'); }
 function resetView() {
-  evs = []; since = 0; heroId = null; verified = false;
+  evs = []; since = 0; heroId = null; verified = false; salesOn = true;
   $('feed').innerHTML = ''; $('decisions').innerHTML = ''; $('verify').innerHTML = ''; $('hero-checks').innerHTML = '';
   $('banner').className = 'banner';
 }
@@ -613,7 +619,10 @@ act('b-free', () => post('withdraw', {mode: 'free'})); act('b-all', () => post('
 act('b-sup', () => post('pay_supplier')); act('b-own', () => post('own_wallet'));
 $('b-verify').addEventListener('click', verifyReferee);
 act('b-payoff', () => post('payoff')); act('b-release', () => post('release'));
-act('b-adv1', () => post('advance', {seconds: 120, revenue_xrp: 10})); act('b-adv2', () => post('advance', {seconds: 600, revenue_xrp: 0}));
+// one click is one payment interval; while sales are stopped no buyer pays
+const IV = () => (S && S.interval) || 120;
+act('b-adv1', () => post('advance', {seconds: IV(), revenue_xrp: salesOn ? 10 : 0}));
+act('b-adv2', async () => { if (!salesOn) { salesOn = true; render(); return null; } salesOn = false; return post('advance', {seconds: IV(), revenue_xrp: 0}); });
 act('b-reset', async () => { resetView(); return post('reset'); });
 act('b-rev', () => post('auto', {revenue: !(S.auto && S.auto.revenue)})); act('b-auto', () => post('auto', {autopilot: !(S.auto && S.auto.autopilot)}));
 if (location.hash === '#underwriting') { $('uw').open = true; $('uw').parentElement.style.order = -1; }  // link straight to the open panel, shown first
