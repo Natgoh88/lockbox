@@ -43,6 +43,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
 
 from xrpl.core import keypairs
 
@@ -288,6 +289,44 @@ def free_cash(ctx: CovenantContext) -> int:
     return b.earned_free_cash + b.owner_funds
 
 
+def xrp_text(drops: int, places: int = 2) -> str:
+    """59.64 XRP, or 0.005 XRP for amounts under a cent. Half up, so 9.995 reads 10.00."""
+    d = Decimal(int(drops)) / Decimal(1_000_000)
+    if 0 < abs(d) < Decimal("0.01"):
+        return f"{d.normalize():f} XRP"
+    return f"{d.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP):,} XRP"
+
+
+# what a payment to the owner's wallet would dip into once the free money runs out, in the order it is named
+NOT_FREE = (("unspent_principal", "of loan money"), ("installment_reserve", "set aside for the next installment"),
+            ("holdback", "held back for repayment"), ("bond", "of the borrower's bond"), ("fee_buffer", "fee buffer"),
+            ("reserve", "ledger reserve"))
+
+
+def not_free_explanation(amount: int, free: int, b: Buckets) -> str:
+    """Plain words for a refused withdrawal: which buckets it would have taken. Text only, never the decision."""
+    short = amount - free
+    parts, takes = [], []
+    left = short
+    for name, words in NOT_FREE:
+        take = min(left, max(0, getattr(b, name)))
+        if take > 0:
+            parts.append((name, f"{xrp_text(take)} {words}"))
+            takes.append(take)
+            left -= take
+    if left > 0:
+        parts.append(("", f"{xrp_text(left)} more than the account holds"))
+    names = {n for n, _ in parts}
+    why = ("Loan money may only pay approved suppliers." if "unspent_principal" in names
+           else "Repayment comes first." if names & {"installment_reserve", "holdback"}
+           else "The bond stays until the loan is settled." if "bond" in names
+           else "The account keeps its XRP reserve and fee buffer.")
+    listed = [w for _, w in parts]
+    joined = listed[0] if len(listed) == 1 else ", ".join(listed[:-1]) + " and " + listed[-1]
+    tiny = any(0 < t < 10_000 for t in takes)  # a sub-cent part: one more decimal so the parts visibly add up
+    return f"That would take {xrp_text(short, 3 if tiny else 2)} that isn't free: {joined}. {why}"
+
+
 def _is_drops(v) -> bool:
     return isinstance(v, str) and v.isdigit()
 
@@ -443,6 +482,7 @@ def evaluate(tx: dict, ctx: CovenantContext) -> Verdict:
             add("destination_allowlisted", dest in ctx.allowlist, f"{dest} is not on the allowlist")
             _not_frozen(add, ctx)
             if _is_drops(amt):
-                add("within_free_cash", int(amt) <= fc, f"amount {amt}, free cash {fc}")
+                ok = int(amt) <= fc
+                add("within_free_cash", ok, f"amount {amt}, free cash {fc}" if ok else not_free_explanation(int(amt), fc, buckets_of(ctx)))
 
     return Verdict(allowed=all(c.ok for c in checks), checks=checks, free_cash=fc)
