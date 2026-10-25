@@ -4,142 +4,220 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lockbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   :root {
-    --bg:#f5f4ef; --card:#fff; --ink:#1b1c1a; --mute:#6a6b64; --line:#e3e2da; --accent:#0f6b5c; --accent-bg:#e1f1ed;
-    --ok:#1a7f4b; --ok-bg:#e3f4ea; --bad:#b3261e; --bad-bg:#fbe7e5; --warn:#8a5a00; --warn-bg:#fbf0d4; --bar:#dcdad0;
-    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --bg:#ffffff; --panel:#ffffff; --ink:#0b0d12; --mute:#5b6270; --line:#e2e5ea; --soft:#f4f5f7;
+    --accent:#2445d6; --ok:#0a7d38; --bad:#c4161c; --warn:#a85a00;
+    --b1:#2445d6; --b2:#7d92ea; --b3:#1f2937; --b4:#4b5563; --b5:#8b93a1; --b6:#b9bec8; --b7:#d9dce2;
+    --sans: Inter, "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#121311; --card:#1b1c1a; --ink:#ecebe4; --mute:#9a9b92; --line:#2b2c28; --accent:#4fc2ac; --accent-bg:#14302a;
-      --ok:#5fd08f; --ok-bg:#16301f; --bad:#ff8a80; --bad-bg:#3a1c19; --warn:#f2c56b; --warn-bg:#3a2e12; --bar:#3a3b35; }
+    :root { --bg:#0b0d10; --panel:#0b0d10; --ink:#eef0f3; --mute:#9aa3b2; --line:#262a31; --soft:#14171c;
+      --accent:#6d8cff; --ok:#2fbf63; --bad:#ff4d4f; --warn:#f0a43a;
+      --b1:#6d8cff; --b2:#3d55b8; --b3:#e5e7eb; --b4:#aab1bd; --b5:#7c8492; --b6:#555c68; --b7:#373c45; }
   }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif; }
-  header { display:flex; align-items:baseline; gap:14px; padding:20px 28px 6px; flex-wrap:wrap; }
-  h1 { font-size:26px; margin:0; letter-spacing:-.02em; }
-  .tag { color:var(--mute); }
-  .net { margin-left:auto; font:12px var(--mono); color:var(--mute); border:1px solid var(--line); padding:3px 9px; border-radius:99px; }
-  main { display:grid; grid-template-columns:minmax(300px,1fr) minmax(340px,1.2fr); gap:16px; padding:12px 28px 28px; }
-  @media (max-width:880px){ main{grid-template-columns:minmax(0,1fr); padding:12px 16px 24px;} header{padding:16px 16px 4px;} }
-  .card { min-width:0; overflow-wrap:anywhere; }
-  .kv { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
-  .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
-  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--mute); margin:0 0 12px; font-weight:600; }
-  .big { font-size:30px; font-weight:650; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
-  .small { color:var(--mute); font-size:13px; }
-  .chip { display:inline-block; padding:2px 10px; border-radius:99px; font-size:12px; font-weight:600; letter-spacing:.04em; }
-  .chip.ok{background:var(--ok-bg);color:var(--ok);} .chip.bad{background:var(--bad-bg);color:var(--bad);}
-  .chip.warn{background:var(--warn-bg);color:var(--warn);} .chip.acc{background:var(--accent-bg);color:var(--accent);} .chip.mute{background:var(--bar);color:var(--mute);}
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .stack { display:flex; height:14px; border-radius:7px; overflow:hidden; background:var(--bar); margin:10px 0 6px; }
-  .stack i { display:block; height:100%; transition:width .4s; }
-  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); }
-  .legend b { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; }
-  button { font:inherit; font-size:13px; font-weight:600; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
-  button:hover { border-color:var(--accent); } button.pri { background:var(--accent); color:#fff; border-color:var(--accent); }
-  button:disabled { opacity:.45; cursor:not-allowed; }
-  .btns { display:flex; gap:8px; flex-wrap:wrap; }
-  .grp { margin-bottom:12px; } .grp .small { margin-bottom:6px; display:block; }
-  .buckets { display:flex; align-items:flex-end; gap:4px; height:54px; margin:6px 0 10px; }
-  .buckets i { flex:1; background:var(--accent); opacity:.85; border-radius:3px 3px 0 0; min-height:2px; }
-  ul.plain { margin:0; padding:0; list-style:none; font-size:13px; } ul.plain li { padding:3px 0; color:var(--mute); }
-  .dots { display:flex; gap:6px; margin:8px 0; } .dots i { width:22px; height:22px; border-radius:50%; background:var(--bar); }
-  .dots i.paid { background:var(--ok); } .dots i.next { outline:2px solid var(--accent); outline-offset:1px; }
-  .kv { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; }
-  .kv b { display:block; font-size:18px; font-variant-numeric:tabular-nums; }
-  .feed { list-style:none; margin:0; padding:0; max-height:300px; overflow:auto; }
-  .feed li { padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
-  .feed .ver { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
-  .checks { display:flex; gap:4px 12px; flex-wrap:wrap; margin-top:4px; font-size:12px; color:var(--mute); }
-  .checks .ok::before{content:"\2713 ";color:var(--ok);font-weight:700;} .checks .no::before{content:"\2717 ";color:var(--bad);font-weight:700;} .checks .no{color:var(--bad);}
-  .empty { color:var(--mute); padding:12px 0; }
-  .card.ref { border:2px solid var(--accent); }
-  .card.ref h2 { color:var(--accent); font-size:13px; }
-  .rule { font:13px var(--mono); }
-  .vt { width:100%; border-collapse:collapse; font-size:12px; margin:6px 0 4px; }
-  .vt th, .vt td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
-  .vt th { color:var(--mute); font-weight:600; }
-  details.checks-d summary { cursor:pointer; font-size:12px; color:var(--mute); margin-top:4px; }
-  .toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:9px 16px; border-radius:8px; font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none; max-width:90vw; }
+  html, body { margin:0; background:var(--bg); color:var(--ink); }
+  body { font:16px/1.45 var(--sans); font-variant-numeric:tabular-nums; padding-bottom:120px; }
+  .mono { font-family:var(--mono); }
+  .mute { color:var(--mute); }
+  button { font:600 15px var(--sans); padding:10px 14px; border-radius:4px; border:1px solid var(--line); background:var(--panel); color:var(--ink); cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button.pri { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.38; cursor:not-allowed; }
+
+  /* top bar */
+  .top { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:24px; padding:14px 32px; background:var(--bg); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .top h1 { font-size:24px; font-weight:800; margin:0; letter-spacing:-.02em; }
+  .ledger { font-size:16px; font-weight:600; padding:4px 10px; border:1px solid var(--line); border-radius:4px; }
+  .ledger.sim { color:var(--warn); border-color:var(--warn); }
+  .ledger.dev { color:var(--accent); border-color:var(--accent); }
+  .top .addr { font:15px var(--mono); color:var(--mute); }
+  .stateword { margin-left:auto; font-size:36px; font-weight:800; letter-spacing:.04em; }
+
+  main { max-width:1856px; margin:0 auto; padding:24px 32px; display:flex; flex-direction:column; gap:24px; }
+  section { border:1px solid var(--line); border-radius:4px; padding:22px 26px; background:var(--panel); min-width:0; }
+  h2 { font-size:16px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--mute); margin:0 0 16px; }
+  .num { font-size:44px; font-weight:700; letter-spacing:-.02em; line-height:1.1; }
+  .num small { font-size:20px; font-weight:500; color:var(--mute); margin-left:6px; }
+  .lab { font-size:16px; color:var(--mute); }
+  .stat b { display:block; font-size:28px; font-weight:700; }
+
+  /* the referee */
+  .ref { border-width:2px; }
+  .ref-head { display:flex; align-items:center; gap:16px; margin-bottom:12px; }
+  .ref-head h2 { margin:0; }
+  .ref-head .rb { font-size:15px; color:var(--mute); }
+  .ref-head button { margin-left:auto; }
+  .banner { display:grid; grid-template-columns:auto 1fr; gap:4px 36px; align-items:center; padding:22px 28px; border-left:12px solid var(--line); background:var(--soft); border-radius:4px; }
+  .banner .word { font-size:120px; font-weight:800; line-height:1; letter-spacing:-.02em; grid-row:span 3; color:var(--mute); }
+  .banner .what { font-size:34px; font-weight:600; line-height:1.2; }
+  .banner .why { font-size:22px; }
+  .banner .meta { font-size:15px; color:var(--mute); }
+  .banner.ok { border-left-color:var(--ok); } .banner.ok .word { color:var(--ok); }
+  .banner.bad { border-left-color:var(--bad); background:color-mix(in srgb, var(--bad) 9%, var(--bg)); } .banner.bad .word { color:var(--bad); }
+  .banner.flash { animation:flash .45s ease-in-out 4; }
+  @keyframes flash { 50% { background:color-mix(in srgb, var(--bad) 32%, var(--bg)); } }
+  details.checks { margin-top:10px; font-size:15px; }
+  details summary { cursor:pointer; color:var(--mute); font-size:15px; }
+  .clist { display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:8px; font:14px var(--mono); }
+  .clist .ok::before { content:"\2713  "; color:var(--ok); } .clist .no { color:var(--bad); } .clist .no::before { content:"\2717  "; }
+  table { width:100%; border-collapse:collapse; font-size:16px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:14px; font-weight:600; color:var(--mute); text-transform:uppercase; letter-spacing:.06em; }
+  td.res { font-weight:700; white-space:nowrap; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; vertical-align:1px; background:var(--mute); }
+  .older { margin-top:18px; }
+  #verify { margin-top:16px; }
+  .vhead { font-size:22px; font-weight:700; margin-bottom:6px; }
+
+  /* three columns */
+  .cols { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:24px; }
+  @media (max-width:1100px) { .cols { grid-template-columns:minmax(0, 1fr); } .banner { grid-template-columns:1fr; } .banner .word { font-size:72px; grid-row:auto; } }
+  .bar { display:flex; height:28px; margin:18px 0 12px; border:1px solid var(--line); border-radius:2px; overflow:hidden; background:var(--soft); }
+  .bar i { display:block; height:100%; transition:width .4s; }
+  .legend { display:grid; grid-template-columns:auto 1fr auto; gap:6px 10px; font-size:16px; align-items:center; }
+  .legend .sw { width:12px; height:12px; border-radius:2px; }
+  .legend .v { text-align:right; font-weight:600; }
+  .fine { font-size:14px; color:var(--mute); margin-top:16px; line-height:1.6; }
+  .fine .mono { color:var(--ink); }
+  .status { display:flex; align-items:center; gap:10px; font-size:22px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .status::before { content:""; width:6px; height:28px; background:var(--cur, var(--mute)); }
+  .dots { display:flex; gap:12px; margin:22px 0; flex-wrap:wrap; }
+  .dots i { width:44px; height:44px; border-radius:50%; border:3px solid var(--b6); }
+  .dots i.paid { background:var(--accent); border-color:var(--accent); }
+  .dots i.next { border-color:var(--accent); }
+  .dots i.lost { border-color:var(--bad); }
+  .pair { display:grid; grid-template-columns:1fr 1fr; gap:18px 24px; }
+  .steps { margin:18px 0 0; padding:0; list-style:none; display:flex; gap:10px; flex-wrap:wrap; font-size:16px; }
+  .steps li { padding:6px 10px; border:1px solid var(--line); border-radius:4px; }
+  .steps li b { color:var(--accent); margin-right:6px; }
+
+  /* underwriting */
+  details.uw > summary { list-style:none; font-size:22px; font-weight:600; color:var(--ink); }
+  details.uw > summary::-webkit-details-marker { display:none; }
+  details.uw > summary::before { content:"\25B8  "; color:var(--mute); }
+  details.uw[open] > summary::before { content:"\25BE  "; }
+  .uwgrid { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:28px; margin-top:20px; }
+  @media (max-width:1100px) { .uwgrid { grid-template-columns:minmax(0, 1fr); } }
+  .hist { display:flex; align-items:flex-end; gap:6px; height:120px; border-bottom:1px solid var(--line); }
+  .hist i { flex:1; background:var(--accent); min-height:3px; }
+  .quotes { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px; }
+  .quote { border:1px solid var(--line); border-radius:4px; padding:14px 16px; }
+  .quote .num { font-size:36px; }
+  .quote.ours { border-color:var(--accent); }
+  .kv { display:grid; grid-template-columns:minmax(150px, auto) 1fr; gap:8px 18px; font-size:16px; }
+  .kv dt { color:var(--mute); } .kv dd { margin:0; font-weight:500; }
+  .kv dd.bad { color:var(--bad); }
+
+  /* activity */
+  .feed { list-style:none; margin:12px 0 0; padding:0; max-height:320px; overflow:auto; font-size:15px; }
+  .feed li { padding:7px 0; border-bottom:1px solid var(--line); }
+
+  /* pinned actions */
+  .actions { position:fixed; left:0; right:0; bottom:0; z-index:5; background:var(--bg); border-top:1px solid var(--line); padding:10px 32px; display:flex; gap:22px; flex-wrap:wrap; align-items:flex-end; }
+  .grp { display:flex; flex-direction:column; gap:6px; }
+  .grp > span { font-size:14px; color:var(--mute); font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+  .grp .btns { display:flex; gap:6px; flex-wrap:wrap; }
+  .toast { position:fixed; bottom:120px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:12px 18px; border-radius:4px; font-size:16px; opacity:0; transition:opacity .25s; pointer-events:none; max-width:90vw; z-index:6; }
   .toast.on { opacity:1; }
+  @media (max-width:700px) { .top, main, .actions { padding-left:16px; padding-right:16px; } .stateword { font-size:26px; } body { padding-bottom:300px; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>Lockbox: a referee that makes loan agreements enforceable on XRPL</h1>
-  <span class="tag">Every payment from the borrower's account needs the referee, which follows a public rulebook anyone can verify.</span>
-  <span class="net" id="net">connecting</span>
+<header class="top">
+  <h1>Lockbox</h1>
+  <span class="ledger" id="net">connecting</span>
+  <span class="addr" id="addr"></span>
+  <span class="stateword" id="stateword"></span>
 </header>
+
 <main>
-  <div class="col">
-    <div class="card">
-      <h2>Lockbox account</h2>
-      <div class="row"><div class="big" id="bal">-</div><span class="small">XRP</span><span id="lockchip" class="chip mute">open</span><span id="frozen"></span></div>
-      <div class="small" id="frozen-why"></div>
-      <div class="stack" id="stack"></div>
-      <div class="legend" id="legend"></div>
-      <div class="small" style="margin-top:6px">Rebuilt from the account's own ledger history, so anyone can recompute it.</div>
-      <div class="small" style="margin-top:10px" id="signers"></div>
-      <div style="margin-top:12px"><span class="small">Approved suppliers (set by the lender before the loan)</span><ul class="plain" id="payees"></ul></div>
-    </div>
-    <div class="card">
-      <h2>Underwriting from the ledger</h2>
-      <div id="offer"><div class="empty">No quote yet.</div></div>
-    </div>
-    <div class="card">
-      <h2>Try it</h2>
-      <div class="grp"><span class="small">Setup</span><div class="btns">
-        <button id="b-lock" class="pri">1. Lock the account</button>
-        <button id="b-quote" class="pri">2. Underwrite</button>
-        <button id="b-borrow" class="pri">3. Take the loan</button></div></div>
-      <div class="grp"><span class="small">Borrower</span><div class="btns">
-        <button id="b-sup">Pay approved supplier</button>
-        <button id="b-own">Send loan money to own wallet</button>
-        <button id="b-free">Withdraw free cash</button>
-        <button id="b-all">Try to withdraw everything</button></div></div>
-      <div class="grp" id="g-sim"><span class="small">Time (simulated ledger)</span><div class="btns">
-        <button id="b-adv1">Advance 2 min, buyers keep paying</button>
-        <button id="b-adv2">Advance 10 min, buyers stop paying</button>
-        <button id="b-reset">Reset</button></div></div>
-      <div class="small" id="hint" style="margin:-4px 0 12px">To see a default: pay the supplier with the loan, then advance 10 minutes with buyers stopped.</div>
-      <div class="grp"><span class="small">End of the loan</span><div class="btns">
-        <button id="b-payoff">Full payoff</button>
-        <button id="b-release">Release the account</button></div></div>
-      <div class="grp" id="g-dev" style="display:none"><span class="small">Autopilot (real ledger)</span><div class="btns">
-        <button id="b-rev">Revenue: on</button><button id="b-auto">Servicer: on</button></div></div>
-    </div>
-  </div>
-  <div class="col">
-    <div class="card ref">
+  <section class="ref">
+    <div class="ref-head">
       <h2>The referee</h2>
-      <div class="small" id="rb">Rulebook: loading</div>
-      <div class="btns" style="margin:10px 0"><button id="b-verify" class="pri">Verify the referee</button></div>
-      <div id="verify"></div>
-      <ul class="feed" id="decisions"><li class="empty">No decisions yet. Every payment from the lockbox shows up here with the rule that decided it.</li></ul>
+      <span class="rb" id="rb"></span>
+      <button id="b-verify" class="pri">Verify the referee</button>
     </div>
-    <div class="card">
+    <div class="banner" id="banner">
+      <div class="word">WAITING</div>
+      <div class="what">No decisions yet</div>
+      <div class="why mute">Every payment out of the lockbox needs the referee. Its decision shows here.</div>
+    </div>
+    <div id="hero-checks"></div>
+    <div class="older"><table id="decisions"></table></div>
+    <div id="verify"></div>
+  </section>
+
+  <div class="cols">
+    <section>
+      <h2>Account</h2>
+      <div class="num" id="bal">-<small>XRP</small></div>
+      <div class="lab" id="frozen-why"></div>
+      <div class="bar" id="stack"></div>
+      <div class="legend" id="legend"></div>
+      <div class="fine" id="signers"></div>
+      <div class="fine" id="payees"></div>
+    </section>
+    <section>
       <h2>Loan</h2>
-      <div id="loan"><div class="empty">No loan yet.</div></div>
-    </div>
-    <div class="card">
+      <div id="loan"><div class="lab">No loan yet.</div></div>
+    </section>
+    <section>
       <h2>Lender side</h2>
-      <div class="kv" id="lender"></div>
-    </div>
-    <div class="card">
-      <h2>Ledger activity</h2>
-      <ul class="feed" id="feed"><li class="empty">Nothing yet.</li></ul>
-    </div>
+      <div id="lender"></div>
+    </section>
   </div>
+
+  <section>
+    <details class="uw" id="uw">
+      <summary id="uw-line">Underwriting: no quote yet</summary>
+      <div id="offer"></div>
+    </details>
+  </section>
+
+  <section>
+    <details>
+      <summary>Ledger activity</summary>
+      <ul class="feed" id="feed"><li class="mute">Nothing yet.</li></ul>
+    </details>
+  </section>
 </main>
+
+<div class="actions">
+  <div class="grp"><span>Borrower</span><div class="btns">
+    <button id="b-lock" class="pri">Lock account</button>
+    <button id="b-sup">Pay supplier</button>
+    <button id="b-own">Send loan to own wallet</button>
+    <button id="b-free">Withdraw free cash</button>
+    <button id="b-all">Withdraw all</button>
+    <button id="b-payoff">Repay in full</button>
+    <button id="b-release">Release account</button></div></div>
+  <div class="grp"><span>Lender</span><div class="btns">
+    <button id="b-quote" class="pri">Underwrite</button>
+    <button id="b-borrow" class="pri">Make the loan</button></div></div>
+  <div class="grp" id="g-sim"><span>Time (simulated)</span><div class="btns">
+    <button id="b-adv1" title="Advance 2 minutes, buyers keep paying">Advance 2 min</button>
+    <button id="b-adv2" title="Advance 10 minutes with no buyer payments">Stop sales</button>
+    <button id="b-reset">Reset</button></div></div>
+  <div class="grp" id="g-dev" style="display:none"><span>Autopilot (Devnet)</span><div class="btns">
+    <button id="b-rev">Revenue: on</button><button id="b-auto">Servicer: on</button></div></div>
+</div>
 <div class="toast" id="toast"></div>
+
 <script>
 const $ = id => document.getElementById(id);
-const xrp = d => (d / 1e6).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-const amt = d => Math.abs(d) > 0 && Math.abs(d) < 10000 ? `${d} drops` : `${xrp(d)} XRP`;  // tiny amounts would read 0.00 XRP
-let since = 0, S = null, evs = [];
-const short = a => a ? a.slice(0, 6) + '...' + a.slice(-4) : '';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const xrp = d => (d / 1e6).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+// one format everywhere: "59.64 XRP"; tiny amounts keep their digits instead of reading 0.00
+const amt = d => { d = +d || 0; return Math.abs(d) > 0 && Math.abs(d) < 10000
+  ? (d / 1e6).toFixed(6).replace(/0+$/, '') + ' XRP' : xrp(d) + ' XRP'; };
+const short = a => a ? a.slice(0, 5) + '\u2026' + a.slice(-4) : '';
+const mono = a => `<span class="mono">${esc(short(a))}</span>`;
+let since = 0, S = null, evs = [], heroId = null;
 
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 3200); }
 async function post(path, body) {
@@ -151,181 +229,274 @@ async function post(path, body) {
   } catch (e) { toast('request failed'); return null; }
 }
 
-function statusChip(st) {
-  const m = {current:'ok', paid:'ok', late:'warn', impaired:'warn', defaultable:'bad', defaulted:'bad', none:'mute'};
-  return `<span class="chip ${m[st] || 'mute'}">${st}</span>`;
-}
-
-const when = t => {  // relative to the ledger's clock: the sim's calendar is not today's
-  if (!t || !S) return '-';
-  const m = Math.round((t - S.now) / 60);
-  return m > 0 ? `in ${m} min` : m < 0 ? `${-m} min ago` : 'now';
+// the deciding rule in plain words
+const RULES = {
+  within_principal: 'Loan money may pay an approved supplier, within its cap, with the invoice number on it.',
+  within_free_cash: "Only earned free cash and the owner's own deposit may go to the owner's wallet. Loan money may not.",
+  covered_by_balance: 'Repayment comes first, as long as the XRP fee reserve stays in the account.',
+  amount_matches_installment: 'A repayment must be the installment or an exact full payoff.',
+  broker_rulebook_hash: 'The loan is under this published rulebook and matches the terms the borrower signed.',
+  borrower_signed_terms: 'The borrower must have signed these exact terms.',
+  agreement_hash_in_data: 'The signed agreement hash must be written on the loan.',
+  ends_before_redemption: 'The loan, grace period included, must end before depositors can redeem.',
+  nothing_owed: 'The account goes back to the borrower only when nothing is owed.',
+  loan_repaid: 'The account goes back to the borrower only after the loan is repaid.',
+  release_to_registered_key: "The account can only go back to the borrower's registered key.",
+  within_recovery_cap: 'After a default the lender is paid what is still owed, no more.',
+  recovery_after_default: 'The lender can only take money out after a default.',
+  loan_current: 'No withdrawals while a payment is past due.',
+  revenue_covers_installment: 'No withdrawals after sales fell short of the installment two intervals in a row.',
+  not_in_default: 'After a default nothing goes to the owner until the lender is repaid.',
+  destination_allowlisted: "Money may only go to the owner's wallet, an approved supplier or the lender.",
+  within_payee_cap: 'Each supplier has a cap set by the lender.',
+  invoice_memo: 'A supplier payment must carry its invoice number.',
+  payoff_while_current: 'A full payoff is only allowed while the loan is not past due.',
+  payoff_within_funds: 'A full payoff may not use the bond or the fee reserve.',
+  no_open_loan: 'One loan at a time.',
+  one_approval_at_a_time: 'The referee hands out one approval at a time.',
+  last_ledger_window: 'An approval is only valid for about 40 seconds.',
+  sequence_is_next: 'An approval is only valid for the next transaction from the account.',
+  fee_cap: 'Transaction fees are capped.',
+  no_forbidden_fields: 'No fields that could change where the money goes.',
+  type: 'Only payments, repayments, the loan itself and the release are allowed.',
 };
+const ruleText = r => RULES[r] || (r ? r.replace(/_/g, ' ') : '');
 
-function quotes(o) {
-  const u = o.unlocked || {};
-  const col = (title, q, note) => `<div class="card" style="padding:10px 12px"><span class="small">${title}</span>
-    ${q.approved ? `<b>${xrp(q.principal)} XRP</b><div class="small">at ${q.rate.toFixed(1)}% a year, installment ${xrp(q.installment)} XRP</div>` : '<b>declined</b>'}
-    ${note}</div>`;
-  return `<div class="kv" style="margin-top:10px">
-    ${col('With the lockbox', {approved: o.approved, principal: o.principal, rate: o.rate_pct || 0, installment: o.installment}, '')}
-    ${col(u.label || 'without a lockbox', {approved: u.approved, principal: u.principal_drops || 0, rate: u.rate_pct || 0, installment: u.installment_drops || 0},
-      `<ul class="plain">${(u.assumptions || []).map(a => '<li>' + a + '</li>').join('')}</ul>`)}</div>`;
+function who(a) {
+  if (!S || !a) return short(a);
+  if (S.approved_payees && S.approved_payees[a]) return 'approved supplier ' + S.approved_payees[a].invoice_ref;
+  if (a === S.payout_address) return "the owner's own wallet";
+  if (a === S.lender_address) return 'the lender';
+  if (a === S.lockbox.address) return 'the lockbox';
+  return short(a);
+}
+const isDry = e => e.kind === 'verdict' && +e.amount === 1;  // a 1-drop approval is a dry run or a test, not a real payment
+function sentence(e) {
+  const a = e.amount ? amt(e.amount) : '';
+  if (e.tx === 'Payment') return `${a} to ${who(e.to)}${e.to === S?.lender_address ? ' (recovery)' : ''}`;
+  if (e.tx === 'LoanPay') return `${a} repayment to the lender`;
+  if (e.tx === 'LoanSet') return `Loan of ${a} into the lockbox`;
+  if (e.tx === 'SetRegularKey') return 'Hand the account back to the borrower';
+  return `${e.tx} ${a}`;
+}
+const ago = ts => { if (!S || !ts) return ''; const s = S.now - ts; return s < 60 ? `${Math.max(0, s)} s ago` : `${Math.round(s / 60)} min ago`; };
+
+function stateWord() {
+  const lb = S.lockbox;
+  const released = lb.master_disabled && !Object.keys(lb.signers || {}).length && lb.regular_key;
+  if (released) return ['RELEASED', 'var(--mute)'];
+  if (!lb.master_disabled) return ['NOT LOCKED', 'var(--mute)'];
+  if ((S.frozen || []).length) return ['FROZEN', 'var(--bad)'];
+  return ['OPEN', 'var(--accent)'];
 }
 
-function stressLine(st) {
-  if (!st || st.stressed_coverage == null) return '';
-  return `<div class="small" style="margin-top:8px">Stress test: if buyer payments drop ${st.revenue_drop_pct}%, they still cover the installment
-    <b style="display:inline;font-size:13px;color:var(--${st.still_covered ? 'ok' : 'bad'})">${st.stressed_coverage.toFixed(2)} times</b>${st.still_covered ? '' : ', NOT enough'}</div>`;
-}
+const PARTS = [
+  ['earned_free_cash', 'Earned free cash', 'var(--b1)'], ['owner_funds', "Owner's own money", 'var(--b2)'],
+  ['unspent_principal', 'Unspent loan money', 'var(--b3)'], ['installment_reserve', 'Next installment', 'var(--b4)'],
+  ['holdback', 'Holdback', 'var(--b5)'], ['bond', 'Bond', 'var(--b6)'],
+  ['reserve', 'Ledger reserve', 'var(--b7)'], ['fee_buffer', 'Fee buffer', 'var(--b7)'],
+];
 
 function render() {
   if (!S) return;
-  const lb = S.lockbox;
-  $('net').textContent = (S.mode === 'sim' ? 'simulated ledger' : 'XRPL devnet') + ' | ' + short(lb.address);
-  $('bal').textContent = xrp(lb.balance);
-  const bk = S.buckets || {};
-  const parts = [
-    ['reserve', 'ledger reserve', 'var(--mute)'], ['fee_buffer', 'fee buffer', 'var(--line)'], ['bond', 'bond', 'var(--bad)'],
-    ['installment_reserve', 'next installment', 'var(--warn)'], ['holdback', 'holdback', '#c98a2b'],
-    ['unspent_principal', 'unspent loan money', '#3d6fb6'], ['earned_free_cash', 'earned free cash', 'var(--accent)'],
-    ['owner_funds', "owner's own money", '#7b5ea7'],
-  ];
-  const tot = Math.max(1, parts.reduce((a, p) => a + (bk[p[0]] || 0), 0));
-  $('stack').innerHTML = parts.map(p => `<i style="width:${(bk[p[0]] || 0) / tot * 100}%;background:${p[2]}" title="${p[1]}"></i>`).join('');
-  $('legend').innerHTML = parts.map(p => `<span><b style="background:${p[2]}"></b>${p[1]} ${xrp(bk[p[0]] || 0)}</span>`).join('');
+  const lb = S.lockbox, bk = S.buckets || {};
+  const sim = S.mode === 'sim';
+  $('net').textContent = sim ? 'Simulated ledger, not real money' : 'XRPL Devnet';
+  $('net').className = 'ledger ' + (sim ? 'sim' : 'dev');
+  $('addr').textContent = short(lb.address);
+  const [w, c] = stateWord();
+  $('stateword').textContent = w; $('stateword').style.color = c;
+  const rb = S.rulebook;
+  $('rb').innerHTML = rb ? `Rulebook ${esc(rb.name)} v${esc(rb.version)}, fingerprint <span class="mono">${esc((rb.fingerprint || '').slice(0, 12))}\u2026</span>` : '';
+
+  // account
+  $('bal').innerHTML = `${xrp(lb.balance)}<small>XRP</small>`;
+  const parts = PARTS.filter(p => (bk[p[0]] || 0) > 0);
+  const tot = Math.max(1, parts.reduce((a, p) => a + bk[p[0]], 0));
+  $('stack').innerHTML = parts.map(p => `<i style="width:${bk[p[0]] / tot * 100}%;background:${p[2]}" title="${p[1]}"></i>`).join('');
+  $('legend').innerHTML = parts.map(p => `<span class="sw" style="background:${p[2]}"></span><span>${p[1]}</span><span class="v">${amt(bk[p[0]])}</span>`).join('');
+  const why = {past_due: 'a payment is past due', revenue_short: 'sales fell short of the installment two intervals in a row', in_default: 'the loan defaulted and the lender is still owed'};
   const fz = S.frozen || [];
-  $('frozen').innerHTML = fz.length ? '<span class="chip bad">withdrawals frozen</span>' : (S.loan && S.status !== 'paid' ? '<span class="chip ok">not frozen</span>' : '');
-  const why = {past_due: 'an installment is past due', revenue_short: 'buyer payments fell short of the installment two intervals in a row', in_default: 'the loan defaulted and recovery is pending'};
-  $('frozen-why').textContent = fz.length ? 'Why: ' + fz.map(r => why[r] || r).join('; ') + '. The lender\'s impaired flag never freezes anything.' : '';
-  const pe = Object.entries(S.approved_payees || {});
-  const paidTo = bk.paid_to_payees || {};
-  $('payees').innerHTML = pe.length ? pe.map(([a, p]) => `<li>${short(a)}, invoice ${p.invoice_ref}, cap ${xrp(p.cap_drops)} XRP, paid ${xrp(paidTo[a] || 0)} XRP</li>`).join('')
-    : '<li>None approved. Loan money can only pay approved suppliers.</li>';
-  const locked = lb.master_disabled;
-  $('lockchip').className = 'chip ' + (locked ? 'acc' : 'mute');
-  $('lockchip').textContent = locked ? 'locked: referee plus one other must sign' : 'open: owner key still works';
-  const sg = Object.keys(lb.signers || {});
-  $('signers').textContent = sg.length ? 'Signers: ' + sg.map(short).join(', ') + ' | quorum ' + lb.quorum + (locked ? ' | master key off' : ' | master key ON') : 'Single key account';
+  $('frozen-why').innerHTML = fz.length ? `<span style="color:var(--bad);font-weight:600">Withdrawals frozen:</span> ${fz.map(r => why[r] || r).join('; ')}.` : '';
+  const sg = Object.entries(lb.signers || {});
+  $('signers').innerHTML = sg.length
+    ? 'Signers: ' + sg.map(([a, wt]) => `${mono(a)} weight ${wt}`).join(', ') + `. Quorum ${lb.quorum}, master key ${lb.master_disabled ? 'off' : 'on'}.`
+    : (lb.regular_key ? `Released: the borrower's key ${mono(lb.regular_key)} controls the account.` : 'Single key account, not locked yet.');
+  const pe = Object.entries(S.approved_payees || {}), paidTo = bk.paid_to_payees || {};
+  $('payees').innerHTML = pe.length
+    ? 'Approved suppliers: ' + pe.map(([a, p]) => `${mono(a)} invoice ${esc(p.invoice_ref)}, paid ${amt(paidTo[a] || 0)} of ${amt(p.cap_drops)}`).join('; ')
+    : 'No approved suppliers. Loan money can only pay approved suppliers.';
 
-  const o = S.offer;
-  if (!o) $('offer').innerHTML = '<div class="empty">No quote yet.</div>';
+  // loan
+  const o = S.offer, L = S.loan;
+  if (!L) $('loan').innerHTML = '<div class="lab">No loan yet.</div>';
   else {
-    const mx = Math.max(1, ...o.buckets);
-    const bars = o.buckets.map(v => `<i style="height:${Math.max(3, v / mx * 100)}%" title="${xrp(v)} XRP"></i>`).join('');
-    $('offer').innerHTML = `
-      <div class="row"><span class="chip ${o.approved ? 'ok' : 'bad'}">${o.approved ? 'approved' : 'declined'}</span>
-      <span class="chip acc">tier ${o.tier}</span><span class="small">score ${o.score}/100</span></div>
-      <div class="buckets">${bars}</div><div class="small">Buyer payments per interval, oldest to newest (real invoice payments into this account)</div>
-      ${quotes(o)}
-      ${stressLine(o.stress)}
-      ${o.graduation && o.graduation.repaid_loans ? `<div class="small" style="margin-top:6px">Graduation: ${o.graduation.repaid_loans} loan(s) repaid on the ledger, limit x${o.graduation.multiplier} (max x${o.graduation.max_multiplier})</div>`
-        : `<div class="small" style="margin-top:6px">Graduation: no loans repaid on the ledger yet, limit x${o.graduation ? o.graduation.multiplier : 1}</div>`}
-      <ul class="plain" style="margin-top:10px">${o.reasons.map(r => '<li>' + r + '</li>').join('')}${o.declines.map(r => '<li style="color:var(--bad)">' + r + '</li>').join('')}</ul>`;
-  }
-
-  const L = S.loan;
-  if (!L) $('loan').innerHTML = '<div class="empty">No loan yet.</div>';
-  else {
-    const total = (o && o.payment_total) || (L.remaining + 0);
+    const total = (o && o.payment_total) || L.remaining;
     const paid = total - L.remaining;
-    const dots = Array.from({length: total}, (_, i) => `<i class="${i < paid ? 'paid' : i === paid && S.status !== 'defaulted' ? 'next' : ''}"></i>`).join('');
-    const due = L.next_due - S.now;
-    $('loan').innerHTML = `
-      <div class="row">${statusChip(S.status)}<span class="small">${paid} of ${total} installments paid</span></div>
+    const dead = S.status === 'defaulted';
+    const dots = Array.from({length: total}, (_, i) => `<i class="${i < paid ? 'paid' : dead ? 'lost' : i === paid ? 'next' : ''}"></i>`).join('');
+    const cur = {current: 'var(--accent)', paid: 'var(--accent)', late: 'var(--warn)', impaired: 'var(--warn)', defaultable: 'var(--bad)', defaulted: 'var(--bad)'}[S.status] || 'var(--mute)';
+    const due = L.next_due - S.now, mmss = s => `${Math.floor(Math.abs(s) / 60)}:${String(Math.abs(s) % 60).padStart(2, '0')}`;
+    const right = dead ? ['Still owed to the lender', amt(S.recovery_remaining)] : S.status === 'paid' ? ['Next due', 'nothing'] : [due >= 0 ? 'Next due in' : 'Overdue by', mmss(due)];
+    $('loan').innerHTML = `<div class="status" style="--cur:${cur}">${esc(S.status)}</div>
       <div class="dots">${dots}</div>
-      <div class="kv"><div><span class="small">Installment</span><b>${xrp(L.installment)} XRP</b></div>
-      <div><span class="small">${S.status === 'defaulted' ? 'Recovery still owed' : due >= 0 ? 'Next due in' : 'Overdue by'}</span><b>${S.status === 'defaulted' ? xrp(S.recovery_remaining) + ' XRP' : Math.abs(due) + ' s'}</b></div></div>`;
+      <div class="lab">${paid} of ${total} installments paid</div>
+      <div class="pair" style="margin-top:18px"><div class="stat"><span class="lab">Installment</span><b>${amt(L.installment)}</b></div>
+      <div class="stat"><span class="lab">${right[0]}</span><b style="${due < 0 && !dead && S.status !== 'paid' ? 'color:var(--warn)' : ''}">${right[1]}</b></div></div>`;
   }
 
+  // lender side
   const B = S.broker, V = S.vault;
-  $('lender').innerHTML = (V ? `<div><span class="small">Vault assets</span><b>${xrp(V.total)} XRP</b></div><div><span class="small">Utilization</span><b>${(V.utilization*100).toFixed(0)}%</b></div>` : '') +
-    (B ? `<div><span class="small">First-loss cover</span><b>${xrp(B.cover)} XRP</b></div><div><span class="small">Debt outstanding</span><b>${xrp(B.debt)} XRP</b></div>` : '') +
-    (V && V.loss_unrealized ? `<div><span class="small">Unrealized loss</span><b style="color:var(--warn)">${xrp(V.loss_unrealized)} XRP</b></div>` : '') +
-    `<div><span class="small">Lender wallet</span><b>${xrp(S.lender_balance)} XRP</b></div>` +
-    (V && V.closed_ended ? `<div><span class="small">Closed-ended vault: deposits close</span><b>${when(V.subscription)}</b></div><div><span class="small">Depositors can redeem</span><b>${when(V.redemption)}</b></div>`
-      : V ? `<div><span class="small">Vault</span><b>open-ended</b></div>` : '') +
-    `<div style="grid-column:1/-1"><span class="small">Who loses first if a loan defaults</span><b style="font-size:14px">1. the borrower's bond, 2. the broker's first-loss cover, 3. depositors</b></div>`;
+  $('lender').innerHTML = `<div class="stat"><span class="lab">Vault assets</span><div class="num">${V ? xrp(V.total) : '-'}<small>XRP</small></div></div>
+    <div class="pair" style="margin-top:18px">
+      <div class="stat"><span class="lab">First-loss cover</span><b>${B ? amt(B.cover) : '-'}</b></div>
+      <div class="stat"><span class="lab">Debt outstanding</span><b>${B ? amt(B.debt) : '-'}</b></div>
+      ${V && V.loss_unrealized ? `<div class="stat"><span class="lab">Unrealized loss</span><b style="color:var(--warn)">${amt(V.loss_unrealized)}</b></div>` : ''}
+      ${V && V.closed_ended ? `<div class="stat"><span class="lab">Depositors can redeem</span><b>${when(V.redemption)}</b></div>` : ''}
+    </div>
+    <div class="lab" style="margin-top:20px">Who loses first if a loan defaults</div>
+    <ol class="steps"><li><b>1</b>Borrower's bond</li><li><b>2</b>Broker's first-loss cover</li><li><b>3</b>Depositors</li></ol>`;
 
+  renderOffer(o);
+
+  // buttons: same rules as before, nothing they call has changed
+  const locked = lb.master_disabled;
   $('b-lock').disabled = locked;
   $('b-quote').disabled = !locked || S.has_loan;
-  $('b-borrow').disabled = !S.has_offer || !(S.offer && S.offer.approved) || S.has_loan;
+  $('b-borrow').disabled = !S.has_offer || !(o && o.approved) || S.has_loan;
   $('b-all').disabled = !locked;
-  const withdrawable = (bk.earned_free_cash || 0) + (bk.owner_funds || 0);  // the referee allows both to the owner's wallet
+  const withdrawable = (bk.earned_free_cash || 0) + (bk.owner_funds || 0);
   $('b-free').disabled = !locked || !(withdrawable > 0);
-  $('b-free').title = withdrawable > 0 ? `earned free cash plus owner's own money: ${xrp(withdrawable)} XRP` : "no earned free cash or owner's own money right now";
-  const rb = S.rulebook;
-  $('rb').innerHTML = rb ? `Rulebook <b>${rb.name} v${rb.version}</b>, fingerprint <span class="rule">${(rb.fingerprint || '').slice(0, 16)}...</span>. The same fingerprint is written in the loan broker's Data field on the ledger.` : 'Rulebook: not set';
+  $('b-free').title = withdrawable > 0 ? `earned free cash plus owner's own money: ${amt(withdrawable)}` : "no earned free cash or owner's own money right now";
   $('b-sup').disabled = !S.has_loan || !Object.keys(S.approved_payees || {}).length;
   $('b-own').disabled = !S.has_loan || !(bk.unspent_principal > 0);
-  $('b-own').title = bk.unspent_principal > 0 ? `asks for everything the owner may take plus ${xrp(bk.unspent_principal)} XRP of loan money` : 'no loan money left in the lockbox';
+  $('b-own').title = bk.unspent_principal > 0 ? `asks for everything the owner may take plus ${amt(bk.unspent_principal)} of loan money` : 'no loan money left in the lockbox';
   $('b-payoff').disabled = !S.has_loan || ['paid', 'defaulted'].includes(S.status);
   $('b-release').disabled = !locked;
-  $('g-sim').style.display = S.mode === 'sim' ? '' : 'none';
-  $('g-dev').style.display = S.mode === 'sim' ? 'none' : '';
+  $('g-sim').style.display = sim ? '' : 'none';
+  $('g-dev').style.display = sim ? 'none' : '';
   if (S.auto) { $('b-rev').textContent = 'Revenue: ' + (S.auto.revenue ? 'on' : 'off'); $('b-auto').textContent = 'Servicer: ' + (S.auto.autopilot ? 'on' : 'off'); }
 }
 
-function label(a) {
-  if (!S) return short(a);
-  if (a === S.lockbox.address) return 'lockbox';
-  if (S.approved_payees && S.approved_payees[a]) return 'approved supplier';
-  if (a === S.payout_address) return "owner's wallet";
-  if (a === S.lender_address) return 'lender';
-  return short(a);
+const when = t => { if (!t || !S) return '-'; const m = Math.round((t - S.now) / 60); return m > 0 ? `in ${m} min` : m < 0 ? `${-m} min ago` : 'now'; };
+
+// "history 7 of 12 intervals: 15/25" and friends, as label and value
+function reasonRow(r, o) {
+  let m;
+  const pts = (a, b) => ` <span class="mute">(${a} of ${b} points)</span>`;
+  if ((m = r.match(/^history (\d+) of (\d+) intervals: (\d+)\/(\d+)$/))) return ['History', `${m[1]} of ${m[2]} intervals` + pts(m[3], m[4])];
+  if ((m = r.match(/^inflow volatility \(std\/mean\) ([\d.]+): (\d+)\/(\d+)$/))) return ['Volatility', `${m[1]} (spread over average)` + pts(m[2], m[3])];
+  if ((m = r.match(/^(\d+) paying sender\(s\), largest share (\d+%): (\d+)\/(\d+)$/))) return ['Buyers', `${m[1]} paying, largest is ${m[2]}` + pts(m[3], m[4])];
+  if ((m = r.match(/^last interval at (\d+%) of the average: (\d+)\/(\d+)$/))) return ['Latest interval', `${m[1]} of the average` + pts(m[2], m[3])];
+  if ((m = r.match(/^sender (r\w+) is (\d+%) of revenue, counted at (\d+%)$/))) return ['Buyer cap', `${mono(m[1])} is ${m[2]} of sales, counted at ${m[3]}`];
+  if ((m = r.match(/^ignored sender (r\w+): (.*)$/))) return ['Ignored buyer', `${mono(m[1])} ${esc(m[2])}`];
+  if ((m = r.match(/^average inflow ([\d.]+) XRP per interval, conservative ([\d.]+) XRP$/)))
+    return ['Average inflow', `${(+m[1]).toFixed(2)} XRP per interval, conservative ${(+m[2]).toFixed(2)} XRP`];
+  if ((m = r.match(/^installment kept at or below conservative inflow \/ ([\d.]+)$/))) return ['Coverage', `installment at most conservative inflow / ${m[1]}`];
+  if ((m = r.match(/^tier (\w): rate ([\d.]+)% a year$/))) return ['Tier', `${m[1]}, ${m[2]}% a year`];
+  if (r.startsWith('stress:') && o.stress && o.stress.stressed_coverage != null)
+    return ['Stress test', `sales down ${o.stress.revenue_drop_pct}%: still covers the installment ${o.stress.stressed_coverage.toFixed(2)} times${o.stress.still_covered ? '' : ', not enough'}`];
+  if ((m = r.match(/^graduation: (.*)$/))) return ['Graduation', esc(m[1])];
+  const i = r.indexOf(': ');
+  return i > 0 ? [esc(r.slice(0, i)), esc(r.slice(i + 2))] : ['Note', esc(r)];
 }
 
-async function verifyReferee() {
-  $('verify').innerHTML = '<div class="small">Checking the rulebook against the ledger and replaying every decision...</div>';
-  try {
-    const r = await fetch('/api/verify'); const j = await r.json();
-    if (!r.ok) { $('verify').innerHTML = `<div class="small" style="color:var(--bad)">${j.detail || 'verify failed'}</div>`; return; }
-    const rb = j.rulebook;
-    const rows = j.rows.map(x => `<tr><td>${x.n}</td><td>${x.tx}</td><td>${x.logged}</td><td class="rule">${x.rule}</td><td>${x.replayed}</td><td style="color:var(--${x.matches ? 'ok' : 'bad'});font-weight:700">${x.matches ? 'yes' : 'NO'}</td></tr>`).join('');
-    $('verify').innerHTML = `<div class="row"><span class="chip ${j.ok ? 'ok' : 'bad'}">${j.ok ? 'verified' : 'mismatch found'}</span><span class="small">on the ${j.ledger}</span></div>
-      <div class="small" style="margin-top:6px">1. Rulebook ${rb.name} v${rb.version}: file fingerprint <span class="rule">${(rb.fingerprint || '').slice(0, 16)}...</span>, on the ledger <span class="rule">${(rb.on_ledger || 'empty').slice(0, 16)}...</span>, match: <b>${rb.matches ? 'yes' : 'NO'}</b>${rb.problems.length ? '<br>' + rb.problems.join('<br>') : ''}</div>
-      <div class="small" style="margin-top:6px">2. Every referee decision replayed from the ledger history with the published rules:</div>
-      ${j.rows.length ? `<div style="overflow-x:auto"><table class="vt"><tr><th>#</th><th>transaction</th><th>referee said</th><th>deciding rule</th><th>replay says</th><th>matches</th></tr>${rows}</table></div>` : '<div class="small">No decisions logged yet.</div>'}`;
-  } catch (e) { $('verify').innerHTML = '<div class="small" style="color:var(--bad)">verify request failed</div>'; }
+function renderOffer(o) {
+  if (!o) { $('uw-line').textContent = 'Underwriting: no quote yet'; $('offer').innerHTML = ''; return; }
+  const u = o.unlocked || {};
+  const pct = x => (x || 0).toFixed(1) + '%';
+  $('uw-line').textContent = o.approved
+    ? `Approved, tier ${o.tier}, ${amt(o.principal)} at ${pct(o.rate_pct)}` + (u.approved ? ` (without Lockbox: ${amt(u.principal_drops)} at ${pct(u.rate_pct)})` : '')
+    : `Declined: ${(o.declines || [])[0] || 'see reasons'}`;
+  const mx = Math.max(1, ...o.buckets);
+  const rows = o.reasons.map(r => reasonRow(r, o)).concat((o.declines || []).map(r => ['Declined', esc(r), true]));
+  const g = o.graduation || {};
+  rows.push(['Score', `${o.score} of 100`]);
+  if (!g.repaid_loans) rows.push(['Graduation', `no loans repaid on the ledger yet, limit x${g.multiplier || 1}`]);
+  $('offer').innerHTML = `<div class="uwgrid">
+    <div>
+      <div class="lab" style="margin-bottom:8px">Buyer payments per interval, oldest to newest</div>
+      <div class="hist">${o.buckets.map(v => `<i style="height:${Math.max(2, v / mx * 100)}%" title="${amt(v)}"></i>`).join('')}</div>
+      <div class="quotes">
+        <div class="quote ours"><div class="lab">With Lockbox</div>${o.approved ? `<div class="num">${xrp(o.principal)}<small>XRP</small></div><div class="lab">${pct(o.rate_pct)} a year, installment ${amt(o.installment)}</div>` : '<div class="num">declined</div>'}</div>
+        <div class="quote"><div class="lab">Without Lockbox</div>${u.approved ? `<div class="num">${xrp(u.principal_drops)}<small>XRP</small></div><div class="lab">${pct(u.rate_pct)} a year, installment ${amt(u.installment_drops)}</div>` : '<div class="num">declined</div>'}
+          <div class="fine" style="margin-top:10px">Our assumptions, not market data: ${(u.assumptions || []).slice(1).map(esc).join(', ')}.</div></div>
+      </div>
+    </div>
+    <dl class="kv">${rows.map(([k, v, bad]) => `<dt>${k}</dt><dd${bad ? ' class="bad"' : ''}>${v}</dd>`).join('')}</dl>
+  </div>`;
+}
+
+function renderDecisions() {
+  const dec = evs.filter(e => e.kind === 'verdict' && !isDry(e)).reverse();
+  const h = dec[0];
+  if (h) {
+    const ok = h.allowed;
+    const ban = $('banner');
+    ban.className = 'banner ' + (ok ? 'ok' : 'bad');
+    ban.innerHTML = `<div class="word">${ok ? 'SIGNED' : 'REFUSED'}</div>
+      <div class="what">${esc(sentence(h))}</div>
+      <div class="why">${esc(ruleText(h.rule))}</div>
+      <div class="meta">Deciding rule <span class="mono">${esc(h.rule || '')}</span>${h.rulebook ? `, rulebook ${esc(h.rulebook)} v${esc(h.rulebook_version)} <span class="mono">${esc((h.rulebook_fingerprint || '').slice(0, 12))}\u2026</span>` : ''}</div>`;
+    if (heroId !== h.i && !ok) { void ban.offsetWidth; ban.classList.add('flash'); }
+    heroId = h.i;
+    const cs = (h.checks || []).map(c => `<span class="${c.ok ? 'ok' : 'no'}">${esc(c.name)}</span>`).join('');
+    $('hero-checks').innerHTML = `<details class="checks"><summary>All ${(h.checks || []).length} checks</summary><div class="clist">${cs}</div></details>`;
+  }
+  const older = dec.slice(1, 6);
+  $('decisions').innerHTML = older.length ? `<tr><th>When</th><th>Transaction</th><th>Result</th><th>Rule</th></tr>` + older.map(e =>
+    `<tr><td class="mute">${ago(e.ts)}</td><td>${esc(sentence(e))}</td>
+     <td class="res" style="color:var(--${e.allowed ? 'ok' : 'bad'})"><span class="dot" style="background:var(--${e.allowed ? 'ok' : 'bad'})"></span>${e.allowed ? 'Signed' : 'Refused'}</td>
+     <td>${esc(ruleText(e.rule))}</td></tr>`).join('') : '';
 }
 
 function renderFeed() {
-  const dec = evs.filter(e => e.kind === 'verdict').slice(-30).reverse();
-  $('decisions').innerHTML = dec.length ? dec.map(e => {
-    const cs = (e.checks || []).map(c => `<span class="${c.ok ? 'ok' : 'no'}">${c.name}</span>`).join('');
-    return `<li><div class="ver"><span class="chip ${e.allowed ? 'ok' : 'bad'}">${e.allowed ? 'referee signs' : 'referee refuses'}</span><b>${e.tx}</b><span class="small">${e.amount ? amt(+e.amount) : ''}${e.to ? ' to ' + label(e.to) : ''}</span></div>
-      <div class="small">Deciding rule: <span class="rule"><b>${e.rule || '-'}</b></span>${e.allowed ? '' : ' (' + e.reason + ')'}</div>
-      <div class="small">${e.rulebook ? `${e.rulebook} v${e.rulebook_version}, fingerprint <span class="rule">${(e.rulebook_fingerprint || '').slice(0, 12)}...</span>` : ''}</div>
-      <details class="checks-d"><summary>all ${(e.checks || []).length} checks</summary><div class="checks">${cs}</div></details></li>`;
-  }).join('') : '<li class="empty">No decisions yet. Every payment from the lockbox shows up here with the rule that decided it.</li>';
-  const items = evs.filter(e => ['loan_pay','loan_set','impair','default','recovery','short','blocked','verify_lockbox','lock','withdraw','quote','error',
-    'pay_payee','pay_off','release_regular_key','release_signer_list','approve_payee'].includes(e.kind)).slice(-40).reverse();
-  if (!items.length) { $('feed').innerHTML = '<li class="empty">Nothing yet.</li>'; return; }
+  renderDecisions();
+  const items = evs.filter(e => ['loan_pay', 'loan_set', 'impair', 'default', 'recovery', 'short', 'blocked', 'verify_lockbox', 'lock', 'withdraw', 'quote', 'error',
+    'pay_payee', 'pay_off', 'release_regular_key', 'release_signer_list', 'approve_payee'].includes(e.kind)).slice(-40).reverse();
+  if (!items.length) { $('feed').innerHTML = '<li class="mute">Nothing yet.</li>'; return; }
   $('feed').innerHTML = items.map(e => {
     const txt = {
-      loan_pay: e => `${e.late ? 'Late ' : ''}installment ${e.ok ? 'collected' : 'failed ' + e.code}: ${xrp(e.drops)} XRP`,
-      loan_set: e => `Loan ${e.ok ? 'originated' : 'failed ' + e.code}: ${xrp(e.principal)} XRP`,
-      impair: e => 'Loan impaired (paper loss booked in the vault)', default: e => `Loan defaulted. First-loss cover paid ${e.covered ? xrp(+e.covered) : '?'} XRP of ${e.loss ? xrp(+e.loss) : '?'}`,
-      recovery: e => `Recovery sweep to the lender: ${amt(e.drops)}`, short: e => `Lockbox short: has ${xrp(e.balance)}, needs ${xrp(e.need)} XRP`,
-      blocked: e => `Referee blocked ${e.tx}: ${e.reason}`, verify_lockbox: e => 'Lender verified the lock: ' + e.checks.map(c => (c.ok ? 'ok ' : 'FAIL ') + c.name).join(', '),
-      lock: e => `${e.tx} ${e.ok ? 'done' : 'failed ' + e.code}`, withdraw: e => `Borrower withdrew ${xrp(e.drops)} XRP`,
+      loan_pay: e => `${e.late ? 'Late ' : ''}installment ${e.ok ? 'collected' : 'failed ' + e.code}: ${amt(e.drops)}`,
+      loan_set: e => `Loan ${e.ok ? 'made' : 'failed ' + e.code}: ${amt(e.principal)}`,
+      impair: e => 'Loan marked impaired (paper loss booked in the vault)',
+      default: e => `Loan defaulted. First-loss cover paid ${e.covered ? amt(e.covered) : '?'} of ${e.loss ? amt(e.loss) : '?'}`,
+      recovery: e => `Recovery to the lender: ${amt(e.drops)}`, short: e => `Lockbox short: has ${amt(e.balance)}, needs ${amt(e.need)}`,
+      blocked: e => `Referee refused ${e.tx}: ${e.reason}`, verify_lockbox: e => 'Lender checked the lock: ' + e.checks.map(c => (c.ok ? 'ok ' : 'FAIL ') + c.name).join(', '),
+      lock: e => `${e.tx} ${e.ok ? 'done' : 'failed ' + e.code}`, withdraw: e => `Withdrawal ${amt(e.drops)} ${e.ok ? 'sent' : 'failed ' + e.code}`,
       quote: e => `Quote: ${e.approved ? 'approved' : 'declined'}, tier ${e.tier}, score ${e.score}`, error: e => 'Error: ' + e.msg,
-      pay_payee: e => `Paid supplier ${short(e.to)} ${xrp(e.drops)} XRP, invoice ${e.invoice} ${e.ok ? '' : '(failed ' + e.code + ')'}`,
-      pay_off: e => `Full payoff ${e.ok ? 'done' : 'failed ' + e.code}: ${xrp(e.drops)} XRP`,
-      release_regular_key: e => `Release step 1, regular key set to the borrower's key: ${e.ok ? 'done' : 'failed ' + e.code}`,
-      release_signer_list: e => `Release step 2, signer list removed: ${e.ok ? 'done, the account is the borrower\'s again' : 'failed ' + e.code}`,
-      approve_payee: e => `Lender approved supplier ${short(e.to)}, cap ${xrp(e.cap)} XRP, invoice ${e.invoice}`,
+      pay_payee: e => `Paid supplier ${short(e.to)} ${amt(e.drops)}, invoice ${e.invoice} ${e.ok ? '' : '(failed ' + e.code + ')'}`,
+      pay_off: e => `Full payoff ${e.ok ? 'done' : 'failed ' + e.code}: ${amt(e.drops)}`,
+      release_regular_key: e => `Release step 1, borrower's key set: ${e.ok ? 'done' : 'failed ' + e.code}`,
+      release_signer_list: e => `Release step 2, signer list removed: ${e.ok ? "done, the account is the borrower's again" : 'failed ' + e.code}`,
+      approve_payee: e => `Lender approved supplier ${short(e.to)}, cap ${amt(e.cap)}, invoice ${e.invoice}`,
     }[e.kind];
-    return `<li>${txt ? txt(e) : e.kind}</li>`;
+    return `<li><span class="mute">${ago(e.ts)}</span>&nbsp;&nbsp;${esc(txt ? txt(e) : e.kind)}</li>`;
   }).join('');
+}
+
+async function verifyReferee() {
+  $('verify').innerHTML = '<div class="lab">Checking the rulebook against the ledger and replaying every decision\u2026</div>';
+  try {
+    const r = await fetch('/api/verify'); const j = await r.json();
+    if (!r.ok) { $('verify').innerHTML = `<div class="lab" style="color:var(--bad)">${esc(j.detail || 'verify failed')}</div>`; return; }
+    const rb = j.rulebook;
+    const tx = s => esc(s).replace(/(\d+) drops/, (_, d) => amt(+d) + (+d === 1 ? ' (dry run)' : ''));
+    const rows = j.rows.map(x => `<tr><td class="mute">${x.n}</td><td>${tx(x.tx)}</td><td>${x.logged === 'allowed' ? 'Signed' : 'Refused'}</td>
+      <td class="mono" style="font-size:14px">${esc(x.rule)}</td><td class="res" style="color:var(--${x.matches ? 'ok' : 'bad'})">${x.matches ? 'Matches' : 'DOES NOT MATCH'}</td></tr>`).join('');
+    $('verify').innerHTML = `<div class="vhead" style="color:var(--${j.ok ? 'ok' : 'bad'})">${j.ok ? 'Verified: every referee decision matched its rules' : 'Mismatch found'}</div>
+      <div class="lab">On the ${esc(j.ledger)}. Rulebook ${esc(rb.name)} v${esc(rb.version)}: file <span class="mono">${esc((rb.fingerprint || '').slice(0, 12))}\u2026</span>,
+        ledger <span class="mono">${esc((rb.on_ledger || 'empty').slice(0, 12))}\u2026</span>, ${rb.matches ? 'same' : 'DIFFERENT'}.${rb.problems.length ? ' ' + rb.problems.map(esc).join(' ') : ''}</div>
+      ${j.rows.length ? `<table style="margin-top:10px"><tr><th>#</th><th>Transaction</th><th>Referee</th><th>Deciding rule</th><th>Replay</th></tr>${rows}</table>` : '<div class="lab">No decisions logged yet.</div>'}`;
+  } catch (e) { $('verify').innerHTML = '<div class="lab" style="color:var(--bad)">verify request failed</div>'; }
 }
 
 async function poll() {
   try {
     S = await (await fetch('/api/state')).json();
     const ne = await (await fetch('/api/events?since=' + since)).json();
-    if (ne.length) { evs = evs.concat(ne); since = ne[ne.length - 1].i; renderFeed(); }
-    render();
+    if (ne.length) { evs = evs.concat(ne); since = ne[ne.length - 1].i; }
+    render(); renderFeed();
   } catch (e) { $('net').textContent = 'offline'; }
 }
 
@@ -335,14 +506,20 @@ const act = (id, fn) => $(id).addEventListener('click', async () => {
   $(id).disabled = false;  // render() then disables it again if the state says so
   await poll(); if (r) renderResult(r);
 });
-function renderResult(r) { if (r.verdict) toast(r.verdict.allowed ? 'Allowed: ' + (r.ok ? 'sent' : 'rejected by ledger') : 'Refused: ' + r.verdict.reason); }
+function renderResult(r) { if (r.verdict) toast(r.verdict.allowed ? 'Signed: ' + (r.ok ? 'sent' : 'rejected by the ledger') : 'Refused: ' + r.verdict.reason); }
+function resetView() {
+  evs = []; since = 0; heroId = null;
+  $('feed').innerHTML = ''; $('decisions').innerHTML = ''; $('verify').innerHTML = ''; $('hero-checks').innerHTML = '';
+  $('banner').className = 'banner';
+  $('banner').innerHTML = '<div class="word">WAITING</div><div class="what">No decisions yet</div><div class="why mute">Every payment out of the lockbox needs the referee. Its decision shows here.</div>';
+}
 act('b-lock', () => post('lock')); act('b-quote', () => post('quote')); act('b-borrow', () => post('borrow'));
 act('b-free', () => post('withdraw', {mode: 'free'})); act('b-all', () => post('withdraw', {mode: 'all'}));
 act('b-sup', () => post('pay_supplier')); act('b-own', () => post('own_wallet'));
 $('b-verify').addEventListener('click', verifyReferee);
 act('b-payoff', () => post('payoff')); act('b-release', () => post('release'));
 act('b-adv1', () => post('advance', {seconds: 120, revenue_xrp: 10})); act('b-adv2', () => post('advance', {seconds: 600, revenue_xrp: 0}));
-act('b-reset', async () => { evs = []; since = 0; $('feed').innerHTML = ''; $('decisions').innerHTML = ''; $('verify').innerHTML = ''; return post('reset'); });
+act('b-reset', async () => { resetView(); return post('reset'); });
 act('b-rev', () => post('auto', {revenue: !(S.auto && S.auto.revenue)})); act('b-auto', () => post('auto', {autopilot: !(S.auto && S.auto.autopilot)}));
 poll(); setInterval(poll, 1500);
 </script>
