@@ -141,6 +141,64 @@ tests/                 unit, sim end-to-end, offline signing checks
 - The lockbox master key is disabled on purpose and cannot be re-enabled by one party. Never run `lock()` on an account you care about.
 - Read-only scoring (script 06) signs nothing. Use it on addresses you own or public business addresses.
 
+## AWS: Lockbox auditor on AgentCore
+
+`agent/` is a read-only agent built with [Strands Agents](https://strandsagents.com) for [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-getting-started.html). Give it a lockbox address, or ask why a payment was refused. It reads the public XRPL Devnet ledger, replays the referee's decisions against the published rulebook, and explains in plain English what happened and which rule decided each payment.
+
+Three tools, all read-only:
+
+| Tool | What it does |
+| --- | --- |
+| `get_account_history(address)` | `account_info` and `account_tx` from `https://s.devnet.rippletest.net:51234`: the lockbox's keys, and every payment it made with who signed it |
+| `verify_lockbox(address)` | checks the rulebook fingerprint against the loan broker's Data field, then replays every referee decision with `lockbox/verify.py` (`replay`, `rulebook_problems`), the same code as `scripts/verify.py` and the dashboard |
+| `get_rulebook()` | the published `rulebooks/lending-covenant-v1.json` and its fingerprints |
+
+The ledger client can only call `account_info`, `account_tx`, `ledger_entry` and `server_info`. There is no signing, no submitting and no wallet. What the ledger cannot say about the past (the clock, the loan as it stood) comes from the referee's published decision log for each Devnet lockbox in `agent/data/lockboxes/`.
+
+**Model.** With AWS credentials the Strands agent calls Amazon Bedrock (Strands' default, Claude Sonnet 4.6 in us-west-2; set `LOCKBOX_MODEL_ID` and `AWS_REGION` to change it) and writes the answer from the tools' results. Without credentials it writes the same facts with a fixed template (`agent/answer.py`), so the agent runs and is tested without an AWS account. `LOCKBOX_AUDITOR_MODE=bedrock` or `offline` forces one or the other.
+
+### Run it locally
+
+```bash
+cd agent
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python bedrock-agentcore strands-agents xrpl-py pytest
+
+.venv/bin/python main.py --ask "What did the referee do on lockbox rnC9yaPArTeyTijnNbhgGajUTd2WHr4CzG?"
+.venv/bin/python main.py --ask "Why was the payment refused on r4UuCzXSK6UReG5enELvQQEwkudqnBWNXe?"
+
+.venv/bin/python main.py            # the AgentCore Runtime contract on http://localhost:8080
+curl -X POST localhost:8080/invocations -H "Content-Type: application/json" \
+  -d '{"prompt": "Why was the payment refused on r4UuCzXSK6UReG5enELvQQEwkudqnBWNXe?"}'
+
+.venv/bin/python -m pytest tests     # 16 tests, no network (recorded Devnet answers)
+```
+
+### Build, with the secret check
+
+```bash
+cd agent && .venv/bin/python build.py
+```
+
+This writes `agent/dist/`: the agent code, only the five `lockbox` modules the replay needs (`verify`, `covenant`, `buckets`, `inflows`, `units`), the rulebook and the decision logs. The build fails if it finds a `.wallets.json`, an `.env` or key file, anything shaped like an XRPL seed, a private key or an AWS key, any seed from the local `.wallets.json`, or code that can sign or submit (`chain.py`, `roles.py`, `xrpl.wallet`, `xrpl.transaction`).
+
+### Deploy to AgentCore Runtime (not run yet: needs AWS credentials)
+
+From the AgentCore docs, for an existing Python agent deployed as a CodeZip (no Docker needed). It needs Node.js 20.12 or later, `uv`, AWS credentials (`aws configure` or `AWS_PROFILE`) with AgentCore permissions, and Bedrock model access.
+
+```bash
+npm install -g @aws/agentcore
+agentcore create --name LockboxAuditor --template agent-python-minimal
+cd agent && .venv/bin/python build.py && cd ..
+cp -R agent/dist/. LockboxAuditor/app/agent/      # main.py, pyproject.toml, lockbox/, data/
+cd LockboxAuditor
+agentcore deploy
+agentcore invoke --runtime agent --payload '{"prompt":"What did the referee do on lockbox rnC9yaPArTeyTijnNbhgGajUTd2WHr4CzG?"}'
+agentcore logs runtime
+```
+
+Clean up with `agentcore remove all --yes` then `agentcore deploy --yes`. Never commit AWS keys; the CLI keeps provider secrets in `agentcore/.env.local`, which must stay out of git.
+
 ## AI assistance
 
 We built Lockbox with help from Claude (Anthropic), used through Claude Code. It wrote and reviewed code and tests with us, ran the Devnet scripts, and read the rippled source to explain ledger errors. Every design decision, rule and number in the rulebook was chosen and checked by the team, and everything was built during the event.
